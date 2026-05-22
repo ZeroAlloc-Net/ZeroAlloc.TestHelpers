@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Authors>Marcel Roozekrans</Authors>
+    <Company>Marcel Roozekrans</Company>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <Copyright>Copyright (c) Marcel Roozekrans</Copyright>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017</WarningsAsErrors>
+  </PropertyGroup>
+</Project>
