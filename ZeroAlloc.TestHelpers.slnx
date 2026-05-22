@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/ZeroAlloc.TestHelpers/ZeroAlloc.TestHelpers.csproj" />
+  <Project Path="tests/ZeroAlloc.TestHelpers.Tests/ZeroAlloc.TestHelpers.Tests.csproj" />
+</Solution>
