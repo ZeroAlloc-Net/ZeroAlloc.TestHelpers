@@ -11,7 +11,20 @@
     <RepositoryUrl>https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <Copyright>Copyright (c) Marcel Roozekrans</Copyright>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>testing;allocation;zero-allocation;zeroalloc;aot;test-helpers</PackageTags>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017</WarningsAsErrors>
   </PropertyGroup>
+
+  <!--
+    PackageIcon and PackageReadmeFile only name the files as they appear at the package root; the
+    None entries are what actually put them there. Setting the properties alone produces NU5046 /
+    NU5039 and leaves nuget.org showing the default placeholder and no readme.
+  -->
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)assets\icon.png" Pack="true" PackagePath="\" />
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 </Project>
