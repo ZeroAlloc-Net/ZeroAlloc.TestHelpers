@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.2.1...v1.2.2) (2026-09-19)
+
+
+### Bug Fixes
+
+* make the helper analyzer-clean across consuming repos ([#37](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/37)) ([980a712](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/980a712749a18dfd45abae71400d0bb624534209))
+
 ## [1.2.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.2.0...v1.2.1) (2026-09-19)
 
 
