@@ -164,10 +164,13 @@ internal static class GeneratorSnapshot
             var method = frame?.GetMethod();
             if (method is null) continue;
 
-            var attributes = method.GetCustomAttributes(inherit: false);
-            for (var a = 0; a < attributes.Length; a++)
+            // foreach over the array and an indexed loop over the List below: the two are not
+            // interchangeable here. This file ships as source and compiles inside every consumer,
+            // so it has to satisfy the union of their analyzers -- HLQ013 wants foreach for an
+            // array, HLQ012 wants indexed access for a List.
+            foreach (var attribute in method.GetCustomAttributes(inherit: false))
             {
-                var name = attributes[a].GetType().Name;
+                var name = attribute.GetType().Name;
                 if (!string.Equals(name, "FactAttribute", StringComparison.Ordinal)
                     && !string.Equals(name, "TheoryAttribute", StringComparison.Ordinal))
                     continue;
