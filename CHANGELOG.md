@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.2.0...v1.2.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* resolve the real test method instead of trusting CallerMemberName ([#35](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/35)) ([273549b](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/273549bf2512b9801d7d3606be8dde55c4fac7cb))
+
 ## [1.2.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.1.0...v1.2.0) (2026-09-19)
 
 
