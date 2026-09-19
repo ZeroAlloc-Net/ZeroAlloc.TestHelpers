@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.1.0...v1.2.0) (2026-09-19)
+
+
+### Features
+
+* make the snapshot API uniform, and add a text overload ([#33](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/33)) ([75a325f](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/75a325f1b145f4ccfb92da2e6c6d867a44d6e48f))
+
 ## [1.1.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.0.0...v1.1.0) (2026-09-19)
 
 
