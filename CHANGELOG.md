@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.2.2...v1.2.3) (2026-09-19)
+
+
+### Bug Fixes
+
+* survive deterministic source paths ([#39](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/39)) ([4ddc290](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/4ddc290a1e34c484aea3c0121b390fe012174df1))
+
 ## [1.2.2](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.2.1...v1.2.2) (2026-09-19)
 
 
