@@ -12,125 +12,167 @@ namespace ZeroAlloc.TestHelpers;
 /// Snapshot comparison for source-generator output, replacing Verify.SourceGenerators.
 ///
 /// Verify 33 introduced a SponsorCheck target that fails the build unless a sponsorship licence
-/// or exemption is declared. Rather than carry a commercial declaration that must be renewed
-/// annually across fifteen repositories, this reproduces the only two things the test suite
-/// actually used: split the driver's output into one snapshot per emitted file, and compare.
+/// or exemption is declared. Rather than carry a commercial declaration that expires annually
+/// across fifteen repositories, this reproduces the only behaviour the suites used.
 ///
-/// The on-disk format is deliberately byte-identical to Verify's, so every existing
-/// <c>.verified.cs</c> file is kept untouched and acts as the regression test for this code:
-/// UTF-8 with BOM, a <c>//HintName:</c> first line, LF endings, and a
-/// <c>{TestClass}.{TestMethod}#{hint}.verified.cs</c> file name.
+/// There are exactly two entry points, and snapshots always live in a <c>Snapshots</c> directory
+/// beside the test file. Verify allowed a flat layout by omitting <c>UseDirectory</c>, and the
+/// repos drifted into using both; the migration normalises them rather than teaching this helper
+/// to reproduce the inconsistency.
+///
+/// The file format is byte-identical to Verify's — UTF-8 with BOM, LF endings, and for generator
+/// output a <c>//HintName:</c> first line — so migrating a repo does not touch a single existing
+/// snapshot, and those snapshots become the regression test for this code.
 /// </summary>
 internal static class GeneratorSnapshot
 {
-    /// <summary>Set to 1 to rewrite the .verified.cs files instead of failing on a mismatch.</summary>
+    /// <summary>Set to 1 to rewrite snapshots instead of failing on a mismatch.</summary>
     private const string UpdateEnvVar = "ZA_SNAPSHOT_UPDATE";
+
+    private const string SnapshotDirectory = "Snapshots";
 
     private static readonly UTF8Encoding Utf8Bom = new(encoderShouldEmitUTF8Identifier: true);
 
     /// <summary>
-    /// Compares every source the driver emitted against its snapshot.
-    /// <paramref name="testFilePath"/> and <paramref name="testMethod"/> are supplied by the
-    /// compiler; the repo's MA0048 rule guarantees the file name matches the test class name,
-    /// which is what Verify used for the snapshot prefix.
+    /// Compares every source the driver emitted against its own snapshot, named
+    /// <c>{TestClass}.{TestMethod}#{hintName}.verified.cs</c>.
+    /// The caller arguments are compiler-supplied; the repos' MA0048 rule guarantees the file
+    /// name matches the test class name, which is what Verify used for the prefix.
     /// </summary>
     public static void Verify(
         GeneratorDriver driver,
-        string directory = "Snapshots",
         [CallerFilePath] string testFilePath = "",
         [CallerMemberName] string testMethod = "")
     {
-        var runResult = driver.GetRunResult();
+        ArgumentNullException.ThrowIfNull(driver);
 
-        var snapshotDir = Path.Combine(Path.GetDirectoryName(testFilePath)!, directory);
-        Directory.CreateDirectory(snapshotDir);
-
-        var prefix = $"{Path.GetFileNameWithoutExtension(testFilePath)}.{testMethod}";
-        bool update = string.Equals(Environment.GetEnvironmentVariable(UpdateEnvVar), "1", StringComparison.Ordinal);
+        var dir = EnsureSnapshotDirectory(testFilePath);
+        var prefix = Prefix(testFilePath, testMethod);
+        var update = IsUpdate();
 
         var produced = new List<string>();
         var failures = new List<string>();
 
-        // Nested loops rather than SelectMany: ZA0601 flags LINQ in a loop, and this runs per test.
-        foreach (var result in runResult.Results)
+        // Nested loops rather than SelectMany: ZA0601 flags LINQ in a loop.
+        foreach (var result in driver.GetRunResult().Results)
         foreach (var generated in result.GeneratedSources)
         {
             var hint = generated.HintName;
-            var stem = hint.EndsWith(".cs", StringComparison.Ordinal)
-                ? hint[..^3]
-                : hint;
+            var stem = hint.EndsWith(".cs", StringComparison.Ordinal) ? hint[..^3] : hint;
             var fileName = $"{prefix}#{stem}.verified.cs";
             produced.Add(fileName);
 
-            // Generators build text with the host's newlines; snapshots are stored with LF so the
-            // files compare equal regardless of the machine that wrote them.
-            var body = generated.SourceText.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
-            var expectedContent = $"//HintName: {hint}\n{body}";
-
-            var path = Path.Combine(snapshotDir, fileName);
-
-            if (update)
-            {
-                File.WriteAllText(path, expectedContent, Utf8Bom);
-                continue;
-            }
-
-            if (!File.Exists(path))
-            {
-                WriteReceived(path, expectedContent);
-                failures.Add($"missing snapshot '{fileName}' (received file written alongside it)");
-                continue;
-            }
-
-            var actual = File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!string.Equals(actual, expectedContent, StringComparison.Ordinal))
-            {
-                WriteReceived(path, expectedContent);
-                failures.Add($"snapshot '{fileName}' differs:{Environment.NewLine}{Diff(actual, expectedContent)}");
-            }
-            else
-            {
-                DeleteReceived(path);
-            }
+            var body = Normalise(generated.SourceText.ToString());
+            Compare(Path.Combine(dir, fileName), $"//HintName: {hint}\n{body}", "cs", update, failures);
         }
 
-        // A snapshot left on disk that the generator no longer emits is a silent pass otherwise —
-        // exactly the class of gap this repo has been fixing all day.
+        // A snapshot for output the generator no longer emits would otherwise pass silently —
+        // a test that quietly stopped testing.
         var orphans = Directory
-            .EnumerateFiles(snapshotDir, $"{prefix}#*.verified.cs")
+            .EnumerateFiles(dir, $"{prefix}#*.verified.cs")
             .Select(Path.GetFileName)
             .Where(f => !produced.Contains(f!, StringComparer.Ordinal))
             .ToList();
 
-        if (orphans.Count > 0 && !update)
+        if (orphans.Count > 0)
         {
-            failures.Add($"snapshots exist for output no longer generated: {string.Join(", ", orphans)}");
-        }
-        else if (orphans.Count > 0)
-        {
-            foreach (var orphan in orphans)
-                File.Delete(Path.Combine(snapshotDir, orphan!));
+            if (update)
+            {
+                foreach (var orphan in orphans) File.Delete(Path.Combine(dir, orphan!));
+            }
+            else
+            {
+                failures.Add($"snapshots exist for output no longer generated: {string.Join(", ", orphans)}");
+            }
         }
 
-        if (failures.Count > 0)
-        {
-            throw new InvalidOperationException(
-                $"Generator snapshot mismatch for {prefix}:{Environment.NewLine}" +
-                string.Join(Environment.NewLine, failures) +
-                $"{Environment.NewLine}Re-run with {UpdateEnvVar}=1 to accept the current output.");
-        }
+        Throw(prefix, failures);
     }
 
-    private static void WriteReceived(string verifiedPath, string content)
-        => File.WriteAllText(
-            verifiedPath.Replace(".verified.cs", ".received.cs", StringComparison.Ordinal),
-            content,
-            Utf8Bom);
-
-    private static void DeleteReceived(string verifiedPath)
+    /// <summary>
+    /// Compares a single string against <c>{TestClass}.{TestMethod}.verified.{extension}</c>, for
+    /// tests that assert emitted text directly rather than a whole generator run.
+    /// </summary>
+    public static void VerifyText(
+        string content,
+        string extension = "txt",
+        [CallerFilePath] string testFilePath = "",
+        [CallerMemberName] string testMethod = "")
     {
-        var received = verifiedPath.Replace(".verified.cs", ".received.cs", StringComparison.Ordinal);
+        var dir = EnsureSnapshotDirectory(testFilePath);
+        var prefix = Prefix(testFilePath, testMethod);
+        var fileName = $"{prefix}.verified.{extension}";
+
+        var failures = new List<string>();
+        Compare(Path.Combine(dir, fileName), Normalise(content ?? string.Empty), extension, IsUpdate(), failures);
+        Throw(prefix, failures);
+    }
+
+    private static void Compare(string path, string expected, string extension, bool update, List<string> failures)
+    {
+        var fileName = Path.GetFileName(path);
+
+        if (update)
+        {
+            File.WriteAllText(path, expected, Utf8Bom);
+            return;
+        }
+
+        if (!File.Exists(path))
+        {
+            WriteReceived(path, expected, extension);
+            failures.Add($"missing snapshot '{fileName}' (a .received.{extension} was written alongside it)");
+            return;
+        }
+
+        var actual = Normalise(File.ReadAllText(path));
+        if (string.Equals(actual, expected, StringComparison.Ordinal))
+        {
+            DeleteReceived(path, extension);
+            return;
+        }
+
+        WriteReceived(path, expected, extension);
+        failures.Add($"snapshot '{fileName}' differs:{Environment.NewLine}{Diff(actual, expected)}");
+    }
+
+    private static string EnsureSnapshotDirectory(string testFilePath)
+    {
+        var dir = Path.Combine(Path.GetDirectoryName(testFilePath)!, SnapshotDirectory);
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private static string Prefix(string testFilePath, string testMethod)
+        => $"{Path.GetFileNameWithoutExtension(testFilePath)}.{testMethod}";
+
+    /// <summary>Snapshots are stored with LF so they compare equal whatever wrote them.</summary>
+    private static string Normalise(string text)
+        => text.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    private static bool IsUpdate()
+        => string.Equals(Environment.GetEnvironmentVariable(UpdateEnvVar), "1", StringComparison.Ordinal);
+
+    private static void WriteReceived(string verifiedPath, string content, string extension)
+        => File.WriteAllText(ReceivedPath(verifiedPath, extension), content, Utf8Bom);
+
+    private static void DeleteReceived(string verifiedPath, string extension)
+    {
+        var received = ReceivedPath(verifiedPath, extension);
         if (File.Exists(received)) File.Delete(received);
+    }
+
+    private static string ReceivedPath(string verifiedPath, string extension)
+        => verifiedPath.Replace($".verified.{extension}", $".received.{extension}", StringComparison.Ordinal);
+
+    private static void Throw(string prefix, List<string> failures)
+    {
+        if (failures.Count == 0) return;
+
+        throw new InvalidOperationException(
+            $"Snapshot mismatch for {prefix}:{Environment.NewLine}" +
+            string.Join(Environment.NewLine, failures) +
+            $"{Environment.NewLine}Re-run with {UpdateEnvVar}=1 to accept the current output.");
     }
 
     /// <summary>First differing line with a little context — enough to see what moved.</summary>
@@ -138,7 +180,7 @@ internal static class GeneratorSnapshot
     {
         var e = expected.Split('\n');
         var a = actual.Split('\n');
-        for (int i = 0; i < Math.Max(e.Length, a.Length); i++)
+        for (var i = 0; i < Math.Max(e.Length, a.Length); i++)
         {
             var el = i < e.Length ? e[i] : "<end of file>";
             var al = i < a.Length ? a[i] : "<end of file>";
