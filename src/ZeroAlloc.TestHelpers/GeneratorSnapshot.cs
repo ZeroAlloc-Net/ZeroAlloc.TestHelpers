@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Diagnostics;
 using System.Text;
 using Microsoft.CodeAnalysis;
 
@@ -46,8 +47,9 @@ internal static class GeneratorSnapshot
     {
         ArgumentNullException.ThrowIfNull(driver);
 
-        var dir = EnsureSnapshotDirectory(testFilePath);
-        var prefix = Prefix(testFilePath, testMethod);
+        var test = ResolveTest(testFilePath, testMethod);
+        var dir = EnsureSnapshotDirectory(test.File);
+        var prefix = Prefix(test.File, test.Method);
         var update = IsUpdate();
 
         var produced = new List<string>();
@@ -78,7 +80,8 @@ internal static class GeneratorSnapshot
         {
             if (update)
             {
-                foreach (var orphan in orphans) File.Delete(Path.Combine(dir, orphan!));
+                for (var i = 0; i < orphans.Count; i++)
+                    File.Delete(Path.Combine(dir, orphans[i]!));
             }
             else
             {
@@ -99,8 +102,9 @@ internal static class GeneratorSnapshot
         [CallerFilePath] string testFilePath = "",
         [CallerMemberName] string testMethod = "")
     {
-        var dir = EnsureSnapshotDirectory(testFilePath);
-        var prefix = Prefix(testFilePath, testMethod);
+        var test = ResolveTest(testFilePath, testMethod);
+        var dir = EnsureSnapshotDirectory(test.File);
+        var prefix = Prefix(test.File, test.Method);
         var fileName = $"{prefix}.verified.{extension}";
 
         var failures = new List<string>();
@@ -141,6 +145,40 @@ internal static class GeneratorSnapshot
         var dir = Path.Combine(Path.GetDirectoryName(testFilePath)!, SnapshotDirectory);
         Directory.CreateDirectory(dir);
         return dir;
+    }
+
+    /// <summary>
+    /// Finds the [Fact]/[Theory] frame rather than trusting the caller attributes.
+    ///
+    /// Several repos route every test through a shared private wrapper, and
+    /// CallerMemberName then reports the wrapper's name for all of them, collapsing every
+    /// snapshot onto one prefix. Verify read the test name from the framework context; this
+    /// walks the stack for the equivalent.
+    /// </summary>
+    private static (string File, string Method) ResolveTest(string callerFile, string callerMember)
+    {
+        var trace = new StackTrace(fNeedFileInfo: true);
+        for (var i = 0; i < trace.FrameCount; i++)
+        {
+            var frame = trace.GetFrame(i);
+            var method = frame?.GetMethod();
+            if (method is null) continue;
+
+            var attributes = method.GetCustomAttributes(inherit: false);
+            for (var a = 0; a < attributes.Length; a++)
+            {
+                var name = attributes[a].GetType().Name;
+                if (!string.Equals(name, "FactAttribute", StringComparison.Ordinal)
+                    && !string.Equals(name, "TheoryAttribute", StringComparison.Ordinal))
+                    continue;
+
+                var file = frame!.GetFileName();
+                return (string.IsNullOrEmpty(file) ? callerFile : file, method.Name);
+            }
+        }
+
+        // No test frame (a helper invoked outside a test): the caller attributes are correct.
+        return (callerFile, callerMember);
     }
 
     private static string Prefix(string testFilePath, string testMethod)
