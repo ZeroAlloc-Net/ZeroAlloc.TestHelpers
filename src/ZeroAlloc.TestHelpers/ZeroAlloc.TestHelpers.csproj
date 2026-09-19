@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <PackageId>ZeroAlloc.TestHelpers</PackageId>
-    <Description>Source-distributed test helpers for the ZeroAlloc.* ecosystem. Currently: AllocationGate (zero-alloc assertion harness for AOT smokes + Tests).</Description>
+    <Description>Source-distributed test helpers for the ZeroAlloc.* ecosystem. AllocationGate (zero-alloc assertion harness for AOT smokes + Tests) and GeneratorSnapshot (source-generator snapshot testing).</Description>
 
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
@@ -16,12 +16,23 @@
              PackagePath="contentFiles/cs/any/ZeroAlloc.TestHelpers/AllocationGate.cs"
              BuildAction="Compile"
              CopyToOutput="false" />
+    <!-- Source-distributed so [CallerFilePath] resolves to the consumer's test file, which is
+         what determines the snapshot directory and file-name prefix. -->
+    <Content Include="GeneratorSnapshot.cs"
+             Pack="true"
+             PackagePath="contentFiles/cs/any/ZeroAlloc.TestHelpers/GeneratorSnapshot.cs"
+             BuildAction="Compile"
+             CopyToOutput="false" />
   </ItemGroup>
   <ItemGroup>
     <AdditionalFiles Include="PublicAPI.Shipped.txt" />
     <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Compile-time only: this project builds its content files purely to validate them
+         (IncludeBuildOutput is false). Consumers of the package already reference Roslyn, and
+         SuppressDependenciesWhenPacking keeps this out of their dependency graph. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
