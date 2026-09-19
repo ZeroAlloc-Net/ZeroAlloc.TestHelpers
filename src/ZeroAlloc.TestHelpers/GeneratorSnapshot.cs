@@ -142,9 +142,34 @@ internal static class GeneratorSnapshot
 
     private static string EnsureSnapshotDirectory(string testFilePath)
     {
-        var dir = Path.Combine(Path.GetDirectoryName(testFilePath)!, SnapshotDirectory);
+        var sourceDir = Path.GetDirectoryName(testFilePath);
+
+        // Deterministic builds rewrite source paths to /_/... , so the compile-time path does
+        // not exist at runtime and creating a directory under it fails with "access to the path
+        // '/_' is denied". Repos that set ContinuousIntegrationBuild hit this on CI only.
+        // Fall back to locating the test project on disk; snapshots live beside its .csproj.
+        if (string.IsNullOrEmpty(sourceDir) || !Directory.Exists(sourceDir))
+            sourceDir = FindProjectDirectory();
+
+        var dir = Path.Combine(sourceDir, SnapshotDirectory);
         Directory.CreateDirectory(dir);
         return dir;
+    }
+
+    /// <summary>Walks up from the test binaries to the directory holding the .csproj.</summary>
+    private static string FindProjectDirectory()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (dir.GetFiles("*.csproj").Length > 0)
+                return dir.FullName;
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException(
+            "Could not locate the test project directory from " + AppContext.BaseDirectory +
+            ". Snapshot paths cannot be resolved under a deterministic build without it.");
     }
 
     /// <summary>
