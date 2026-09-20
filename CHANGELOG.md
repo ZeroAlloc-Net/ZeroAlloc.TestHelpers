@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.3.1...v1.3.2) (2026-09-20)
+
+
+### Bug Fixes
+
+* **ci:** pin the SDK floor at the .NET 10 GA band, not the newest patch ([#45](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/45)) ([d9660f0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/d9660f0bd1f257f0cfd749baece2e8d6cdb80a9d))
+
 ## [1.3.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.3.0...v1.3.1) (2026-09-20)
 
 
