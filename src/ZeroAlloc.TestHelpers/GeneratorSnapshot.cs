@@ -46,9 +46,21 @@ internal static class GeneratorSnapshot
         [CallerMemberName] string testMethod = "")
     {
         ArgumentNullException.ThrowIfNull(driver);
+        Verify(driver.GetRunResult(), testFilePath, testMethod);
+    }
 
+    /// <summary>
+    /// Overload for harnesses that hand back the run result rather than the driver.
+    /// ZeroAlloc.ORM's does, and converting forty call sites to re-expose the driver would be
+    /// churn for no benefit.
+    /// </summary>
+    public static void Verify(
+        GeneratorDriverRunResult runResult,
+        [CallerFilePath] string testFilePath = "",
+        [CallerMemberName] string testMethod = "")
+    {
         var test = ResolveTest(testFilePath, testMethod);
-        var dir = EnsureSnapshotDirectory(test.File);
+        var dir = EnsureSnapshotDirectory();
         var prefix = Prefix(test.File, test.Method);
         var update = IsUpdate();
 
@@ -56,7 +68,7 @@ internal static class GeneratorSnapshot
         var failures = new List<string>();
 
         // Nested loops rather than SelectMany: ZA0601 flags LINQ in a loop.
-        foreach (var result in driver.GetRunResult().Results)
+        foreach (var result in runResult.Results)
         foreach (var generated in result.GeneratedSources)
         {
             var hint = generated.HintName;
@@ -103,7 +115,7 @@ internal static class GeneratorSnapshot
         [CallerMemberName] string testMethod = "")
     {
         var test = ResolveTest(testFilePath, testMethod);
-        var dir = EnsureSnapshotDirectory(test.File);
+        var dir = EnsureSnapshotDirectory();
         var prefix = Prefix(test.File, test.Method);
         var fileName = $"{prefix}.verified.{extension}";
 
@@ -140,18 +152,15 @@ internal static class GeneratorSnapshot
         failures.Add($"snapshot '{fileName}' differs:{Environment.NewLine}{Diff(actual, expected)}");
     }
 
-    private static string EnsureSnapshotDirectory(string testFilePath)
+    /// <summary>
+    /// Snapshots live in a Snapshots folder directly under the test project, in every repo —
+    /// including ones whose test classes sit in subfolders, where the test file's own directory
+    /// would be wrong. Resolving from the project rather than from the caller path also means
+    /// deterministic builds, which rewrite source paths to /_/... , need no special handling.
+    /// </summary>
+    private static string EnsureSnapshotDirectory()
     {
-        var sourceDir = Path.GetDirectoryName(testFilePath);
-
-        // Deterministic builds rewrite source paths to /_/... , so the compile-time path does
-        // not exist at runtime and creating a directory under it fails with "access to the path
-        // '/_' is denied". Repos that set ContinuousIntegrationBuild hit this on CI only.
-        // Fall back to locating the test project on disk; snapshots live beside its .csproj.
-        if (string.IsNullOrEmpty(sourceDir) || !Directory.Exists(sourceDir))
-            sourceDir = FindProjectDirectory();
-
-        var dir = Path.Combine(sourceDir, SnapshotDirectory);
+        var dir = Path.Combine(FindProjectDirectory(), SnapshotDirectory);
         Directory.CreateDirectory(dir);
         return dir;
     }
