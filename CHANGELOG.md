@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.3.0...v1.3.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* satisfy CA1512 in AllocationGate ([#43](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/43)) ([370b7df](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/370b7df240de2b81a83c2492ee34b21f68edb66e))
+
 ## [1.3.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.2.3...v1.3.0) (2026-09-20)
 
 
