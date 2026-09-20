@@ -5,7 +5,7 @@ internal static class AllocationGate
     public static void AssertBudget(int budgetBytes, int iterations, Action action, string label)
     {
         ArgumentNullException.ThrowIfNull(action);
-        if (iterations < 1) throw new ArgumentOutOfRangeException(nameof(iterations));
+        ArgumentOutOfRangeException.ThrowIfLessThan(iterations, 1);
 
         // Warmup — JIT-compile, populate type-handle caches, allocate one-time fixtures.
         action();
@@ -34,7 +34,7 @@ internal static class AllocationGate
     public static void AssertBudgetValueTask<T>(int budgetBytes, int iterations, Func<ValueTask<T>> action, string label)
     {
         ArgumentNullException.ThrowIfNull(action);
-        if (iterations < 1) throw new ArgumentOutOfRangeException(nameof(iterations));
+        ArgumentOutOfRangeException.ThrowIfLessThan(iterations, 1);
 
         static T Drain(ValueTask<T> t)
         {
