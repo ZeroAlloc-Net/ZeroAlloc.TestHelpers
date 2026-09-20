@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.2.3...v1.3.0) (2026-09-20)
+
+
+### Features
+
+* accept a run result, and resolve snapshots from the project ([#41](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/41)) ([13b950a](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/13b950ada5f55895ed179e40f322bc88d61915fa))
+
 ## [1.2.3](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.2.2...v1.2.3) (2026-09-19)
 
 
