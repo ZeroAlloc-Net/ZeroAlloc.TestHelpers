@@ -53,6 +53,3 @@ jobs:
 
   api-compat:
     uses: ZeroAlloc-Net/.github/.github/workflows/api-compat.yml@main
-    with:
-      package-id: ZeroAlloc.TestHelpers
-      csproj-path: src/ZeroAlloc.TestHelpers/ZeroAlloc.TestHelpers.csproj
