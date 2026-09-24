@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.3.2...v1.3.3) (2026-09-24)
+
+
+### Bug Fixes
+
+* compile GeneratorSnapshot only in consumers that reference Roslyn ([#51](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/51)) ([f87ac53](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/f87ac53cbb83b88a3b93b24e91eacf80566bd9fc)), closes [#50](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/50)
+
 ## [1.3.2](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.3.1...v1.3.2) (2026-09-20)
 
 
