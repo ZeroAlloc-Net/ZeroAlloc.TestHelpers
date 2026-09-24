@@ -1,0 +1,4 @@
+<Project>
+  <!-- Same logic for consumers that let the content files flow on to their own dependents. -->
+  <Import Project="$(MSBuildThisFileDirectory)..\build\ZeroAlloc.TestHelpers.targets" />
+</Project>

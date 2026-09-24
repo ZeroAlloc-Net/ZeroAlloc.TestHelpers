@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The shape of the ~15 ZeroAlloc generator test projects: they reference Roslyn and use
+    GeneratorSnapshot with no package-specific configuration. That must keep working unchanged.
+  -->
+  <PropertyGroup>
+    <!-- HelloGenerator is a test double living in the test assembly; the analyzer-authoring
+         rules about where a real generator ships do not apply to it. -->
+    <NoWarn>$(NoWarn);RS1036;RS1041</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ZeroAlloc.TestHelpers">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>contentfiles;build</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+</Project>

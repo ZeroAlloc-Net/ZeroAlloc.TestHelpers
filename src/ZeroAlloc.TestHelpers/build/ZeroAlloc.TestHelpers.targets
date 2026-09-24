@@ -1,0 +1,42 @@
+<Project>
+  <!--
+    The package ships two source files as contentFiles that compile into the consumer:
+    AllocationGate.cs, which needs only the BCL, and GeneratorSnapshot.cs, which needs
+    Microsoft.CodeAnalysis. A consumer without Roslyn, such as a Native AOT smoke app that only
+    gates allocations, cannot compile the second one, so it is dropped from the compile unless
+    the consumer can build it.
+
+    ZeroAllocTestHelpersIncludeGeneratorSnapshot
+      unset  auto: keep GeneratorSnapshot.cs only when Microsoft.CodeAnalysis.dll is among the
+             resolved references. Generator test projects already reference Roslyn, so they
+             keep it with no configuration.
+      true   always compile it.
+      false  never compile it.
+
+    The check reads the resolved references rather than PackageReference items, so Roslyn that
+    arrives transitively or through a project reference is seen too, and it looks for
+    Microsoft.CodeAnalysis.dll because that is the assembly GeneratorSnapshot.cs uses;
+    Microsoft.CodeAnalysis.CSharp always brings it along.
+
+    AfterTargets puts the removal right after resolution, ahead of everything that hashes or
+    reads Compile; BeforeTargets guarantees it has run by the time the compiler is invoked.
+  -->
+  <Target Name="_ZeroAllocTestHelpersSelectGeneratorSnapshot"
+          AfterTargets="ResolveAssemblyReferences"
+          BeforeTargets="CoreCompile"
+          Condition="'$(ZeroAllocTestHelpersIncludeGeneratorSnapshot)' != 'true'">
+    <ItemGroup>
+      <_ZeroAllocTestHelpersRoslyn Include="@(ReferencePath)"
+                                   Condition="'%(Filename)%(Extension)' == 'Microsoft.CodeAnalysis.dll'" />
+      <_ZeroAllocTestHelpersGeneratorSnapshot Include="@(Compile)"
+                                              Condition="'%(Filename)%(Extension)' == 'GeneratorSnapshot.cs' and '%(Compile.NuGetPackageId)' == 'ZeroAlloc.TestHelpers'" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(ZeroAllocTestHelpersIncludeGeneratorSnapshot)' == 'false' or '@(_ZeroAllocTestHelpersRoslyn)' == ''">
+      <Compile Remove="@(_ZeroAllocTestHelpersGeneratorSnapshot)" />
+    </ItemGroup>
+    <ItemGroup>
+      <_ZeroAllocTestHelpersRoslyn Remove="@(_ZeroAllocTestHelpersRoslyn)" />
+      <_ZeroAllocTestHelpersGeneratorSnapshot Remove="@(_ZeroAllocTestHelpersGeneratorSnapshot)" />
+    </ItemGroup>
+  </Target>
+</Project>

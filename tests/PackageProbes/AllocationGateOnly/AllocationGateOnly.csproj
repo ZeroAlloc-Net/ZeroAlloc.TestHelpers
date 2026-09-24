@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Issue #50: a consumer that wants only AllocationGate, with no Roslyn reference anywhere in its
+    graph, such as a Native AOT smoke app. GeneratorSnapshot.cs must not reach its compile.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ZeroAlloc.TestHelpers">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>contentfiles;build</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+</Project>

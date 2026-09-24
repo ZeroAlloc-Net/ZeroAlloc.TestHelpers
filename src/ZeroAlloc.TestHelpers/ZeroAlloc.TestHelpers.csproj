@@ -23,6 +23,9 @@
              PackagePath="contentFiles/cs/any/ZeroAlloc.TestHelpers/GeneratorSnapshot.cs"
              BuildAction="Compile"
              CopyToOutput="false" />
+    <!-- Drops GeneratorSnapshot.cs from consumers that have no Roslyn reference, see the file. -->
+    <None Include="build/ZeroAlloc.TestHelpers.targets" Pack="true" PackagePath="build/" />
+    <None Include="buildTransitive/ZeroAlloc.TestHelpers.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
   <ItemGroup>
     <AdditionalFiles Include="PublicAPI.Shipped.txt" />
