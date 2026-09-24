@@ -1,0 +1,16 @@
+<Project>
+  <!--
+    Deliberately does not import the repository's Directory.Build.props: these projects stand in
+    for external consumers of the packed nupkg, so they must not inherit this repo's settings.
+    They do keep the strictness consumers use, since the package source compiles under it.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+    <!-- Version of the locally packed ZeroAlloc.TestHelpers under test; run.sh sets it. -->
+    <ZeroAllocTestHelpersVersion Condition="'$(ZeroAllocTestHelpersVersion)' == ''">1.0.0</ZeroAllocTestHelpersVersion>
+  </PropertyGroup>
+</Project>
