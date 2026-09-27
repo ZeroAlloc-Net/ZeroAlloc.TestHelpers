@@ -40,11 +40,15 @@ jobs:
       - name: Restore
         run: dotnet restore
       - name: Build
-        run: dotnet build --configuration Release --no-restore
+        # CI packages carry an explicit CI version; there is no GitVersion here. It goes to the
+        # build, not only to pack: pack runs --no-build, and the version guard checks the
+        # assembly this step built. Without it the CI package claimed the fallback 1.0.0 from
+        # Directory.Build.props. See ZeroAlloc-Net/.github#36.
+        run: dotnet build --configuration Release --no-restore -p:Version=0.0.0-ci.${{ github.run_number }}
       - name: Test
         run: dotnet test --configuration Release --no-build --verbosity normal
       - name: Pack (verify)
-        run: dotnet pack src/ZeroAlloc.TestHelpers/ZeroAlloc.TestHelpers.csproj --configuration Release --no-build --output ./artifacts
+        run: dotnet pack src/ZeroAlloc.TestHelpers/ZeroAlloc.TestHelpers.csproj --configuration Release --no-build --output ./artifacts -p:Version=0.0.0-ci.${{ github.run_number }}
       - name: Package probes
         # Builds consumer projects against the packed nupkg rather than the linked sources, which
         # is the only way the contentFiles and build/*.targets are exercised. Includes a Native
