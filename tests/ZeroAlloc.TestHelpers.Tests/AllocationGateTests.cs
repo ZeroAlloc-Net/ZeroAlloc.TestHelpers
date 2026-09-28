@@ -51,11 +51,12 @@ public sealed class AllocationGateTests
     [Fact]
     public void AssertBudgetValueTask_AsyncCompletion_ThrowsSyncCompletionRequired()
     {
-        async ValueTask<int> AsyncBody()
-        {
-            await Task.Yield(); // forces async completion
-            return 42;
-        }
+        // A ValueTask backed by a TaskCompletionSource whose Task is never completed is
+        // deterministically incomplete: IsCompletedSuccessfully is guaranteed false on the
+        // very first check, unlike `await Task.Yield()`, whose continuation can race ahead
+        // of the check and complete the ValueTask synchronously from the gate's viewpoint.
+        static ValueTask<int> AsyncBody() =>
+            new(new TaskCompletionSource<int>().Task);
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
             AllocationGate.AssertBudgetValueTask<int>(
