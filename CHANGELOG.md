@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.3.3...v1.4.0) (2026-10-01)
+
+
+### Features
+
+* expose AllocationGate's per-call measurement and add relative gates ([#57](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/57)) ([00f5f01](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/00f5f012cf00bafd22103dbd1df6328b553e519b)), closes [#56](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/56)
+
 ## [1.3.3](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.3.2...v1.3.3) (2026-09-24)
 
 
