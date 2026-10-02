@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.4.0...v1.5.0) (2026-10-02)
+
+
+### Features
+
+* add TextSnapshot.VerifyText, which compiles without a Roslyn reference ([#60](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/60)) ([0828ed7](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/0828ed71200d5541ec42da7bd6144215521fbf36)), closes [#59](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/59)
+
 ## [1.4.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.3.3...v1.4.0) (2026-10-01)
 
 
