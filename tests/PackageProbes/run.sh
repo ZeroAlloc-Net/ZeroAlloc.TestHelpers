@@ -6,6 +6,8 @@
 #                              natively; GeneratorSnapshot.cs must stay out of its compile. #50
 #   GeneratorSnapshotConsumer  references Roslyn. Must keep GeneratorSnapshot with no settings,
 #                              and its snapshot tests must pass.
+#   TextSnapshotOnly           a test project with no Roslyn reference. TextSnapshot must compile
+#                              and its snapshot tests pass; GeneratorSnapshot.cs must stay out. #59
 #
 # The ZeroAllocTestHelpersIncludeGeneratorSnapshot override is checked in both directions.
 #
@@ -31,6 +33,10 @@ echo "::group::AllocationGateOnly builds and runs without Roslyn"
 dotnet run --project "$here/AllocationGateOnly" --configuration Release "${props[@]}"
 echo "::endgroup::"
 
+echo "::group::TextSnapshotOnly snapshots strings without Roslyn"
+dotnet test "$here/TextSnapshotOnly" --configuration Release "${props[@]}"
+echo "::endgroup::"
+
 echo "::group::GeneratorSnapshotConsumer keeps GeneratorSnapshot"
 dotnet test "$here/GeneratorSnapshotConsumer" --configuration Release "${props[@]}"
 echo "::endgroup::"
@@ -52,6 +58,7 @@ expect_failure() {
 
 echo "::group::Override: true forces GeneratorSnapshot in, false forces it out"
 expect_failure AllocationGateOnly "error CS0234" -p:ZeroAllocTestHelpersIncludeGeneratorSnapshot=true
+expect_failure TextSnapshotOnly "error CS0246: The type or namespace name 'GeneratorDriver'" -p:ZeroAllocTestHelpersIncludeGeneratorSnapshot=true
 expect_failure GeneratorSnapshotConsumer "error CS0103" -p:ZeroAllocTestHelpersIncludeGeneratorSnapshot=false
 echo "::endgroup::"
 

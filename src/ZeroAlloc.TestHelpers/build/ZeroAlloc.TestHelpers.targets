@@ -1,10 +1,10 @@
 <Project>
   <!--
-    The package ships two source files as contentFiles that compile into the consumer:
-    AllocationGate.cs, which needs only the BCL, and GeneratorSnapshot.cs, which needs
-    Microsoft.CodeAnalysis. A consumer without Roslyn, such as a Native AOT smoke app that only
-    gates allocations, cannot compile the second one, so it is dropped from the compile unless
-    the consumer can build it.
+    The package ships three source files as contentFiles that compile into the consumer:
+    AllocationGate.cs and TextSnapshot.cs, which need only the BCL, and GeneratorSnapshot.cs,
+    which needs Microsoft.CodeAnalysis. A consumer without Roslyn, such as a Native AOT smoke app
+    that only gates allocations or a test project that only snapshots strings, cannot compile the
+    last one, so it is dropped from the compile unless the consumer can build it.
 
     ZeroAllocTestHelpersIncludeGeneratorSnapshot
       unset  auto: keep GeneratorSnapshot.cs only when Microsoft.CodeAnalysis.dll is among the

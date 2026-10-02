@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <PackageId>ZeroAlloc.TestHelpers</PackageId>
-    <Description>Source-distributed test helpers for the ZeroAlloc.* ecosystem. AllocationGate (zero-alloc assertion harness for AOT smokes + Tests) and GeneratorSnapshot (source-generator snapshot testing).</Description>
+    <Description>Source-distributed test helpers for the ZeroAlloc.* ecosystem. AllocationGate (zero-alloc assertion harness for AOT smokes + Tests), TextSnapshot (string snapshot testing, no Roslyn needed) and GeneratorSnapshot (source-generator snapshot testing).</Description>
 
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
@@ -17,7 +17,13 @@
              BuildAction="Compile"
              CopyToOutput="false" />
     <!-- Source-distributed so [CallerFilePath] resolves to the consumer's test file, which is
-         what determines the snapshot directory and file-name prefix. -->
+         what determines the snapshot directory and file-name prefix. TextSnapshot needs only
+         the BCL and always compiles; GeneratorSnapshot builds on it. -->
+    <Content Include="TextSnapshot.cs"
+             Pack="true"
+             PackagePath="contentFiles/cs/any/ZeroAlloc.TestHelpers/TextSnapshot.cs"
+             BuildAction="Compile"
+             CopyToOutput="false" />
     <Content Include="GeneratorSnapshot.cs"
              Pack="true"
              PackagePath="contentFiles/cs/any/ZeroAlloc.TestHelpers/GeneratorSnapshot.cs"

@@ -1,10 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Diagnostics;
-using System.Text;
 using Microsoft.CodeAnalysis;
 
 namespace ZeroAlloc.TestHelpers;
@@ -16,10 +15,11 @@ namespace ZeroAlloc.TestHelpers;
 /// or exemption is declared. Rather than carry a commercial declaration that expires annually
 /// across fifteen repositories, this reproduces the only behaviour the suites used.
 ///
-/// There are exactly two entry points, and snapshots always live in a <c>Snapshots</c> directory
-/// beside the test file. Verify allowed a flat layout by omitting <c>UseDirectory</c>, and the
-/// repos drifted into using both; the migration normalises them rather than teaching this helper
-/// to reproduce the inconsistency.
+/// Generator output has two entry points, the <c>Verify</c> overloads, and snapshots always live in
+/// a <c>Snapshots</c> directory under the test project. The plumbing they share with string
+/// snapshots lives in <see cref="TextSnapshot"/>, which compiles without Roslyn. Verify allowed a
+/// flat layout by omitting <c>UseDirectory</c>, and the repos drifted into using both; the
+/// migration normalises them rather than teaching this helper to reproduce the inconsistency.
 ///
 /// The file format is byte-identical to Verify's — UTF-8 with BOM, LF endings, and for generator
 /// output a <c>//HintName:</c> first line — so migrating a repo does not touch a single existing
@@ -27,19 +27,13 @@ namespace ZeroAlloc.TestHelpers;
 /// </summary>
 internal static class GeneratorSnapshot
 {
-    /// <summary>Set to 1 to rewrite snapshots instead of failing on a mismatch.</summary>
-    private const string UpdateEnvVar = "ZA_SNAPSHOT_UPDATE";
-
-    private const string SnapshotDirectory = "Snapshots";
-
-    private static readonly UTF8Encoding Utf8Bom = new(encoderShouldEmitUTF8Identifier: true);
-
     /// <summary>
     /// Compares every source the driver emitted against its own snapshot, named
     /// <c>{TestClass}.{TestMethod}#{hintName}.verified.cs</c>.
     /// The caller arguments are compiler-supplied; the repos' MA0048 rule guarantees the file
     /// name matches the test class name, which is what Verify used for the prefix.
     /// </summary>
+    [RequiresUnreferencedCode(TextSnapshot.StackWalkReason)]
     public static void Verify(
         GeneratorDriver driver,
         [CallerFilePath] string testFilePath = "",
@@ -54,15 +48,16 @@ internal static class GeneratorSnapshot
     /// ZeroAlloc.ORM's does, and converting forty call sites to re-expose the driver would be
     /// churn for no benefit.
     /// </summary>
+    [RequiresUnreferencedCode(TextSnapshot.StackWalkReason)]
     public static void Verify(
         GeneratorDriverRunResult runResult,
         [CallerFilePath] string testFilePath = "",
         [CallerMemberName] string testMethod = "")
     {
-        var test = ResolveTest(testFilePath, testMethod);
-        var dir = EnsureSnapshotDirectory();
-        var prefix = Prefix(test.File, test.Method);
-        var update = IsUpdate();
+        var test = TextSnapshot.ResolveTest(testFilePath, testMethod);
+        var dir = TextSnapshot.EnsureSnapshotDirectory();
+        var prefix = TextSnapshot.Prefix(test.File, test.Method);
+        var update = TextSnapshot.IsUpdate();
 
         var produced = new List<string>();
         var failures = new List<string>();
@@ -76,8 +71,8 @@ internal static class GeneratorSnapshot
             var fileName = $"{prefix}#{stem}.verified.cs";
             produced.Add(fileName);
 
-            var body = Normalise(generated.SourceText.ToString());
-            Compare(Path.Combine(dir, fileName), $"//HintName: {hint}\n{body}", "cs", update, failures);
+            var body = TextSnapshot.Normalise(generated.SourceText.ToString());
+            TextSnapshot.Compare(Path.Combine(dir, fileName), $"//HintName: {hint}\n{body}", "cs", update, failures);
         }
 
         // A snapshot for output the generator no longer emits would otherwise pass silently —
@@ -101,171 +96,19 @@ internal static class GeneratorSnapshot
             }
         }
 
-        Throw(prefix, failures);
+        TextSnapshot.Throw(prefix, failures);
     }
 
     /// <summary>
-    /// Compares a single string against <c>{TestClass}.{TestMethod}.verified.{extension}</c>, for
-    /// tests that assert emitted text directly rather than a whole generator run.
+    /// Compares a single string against <c>{TestClass}.{TestMethod}.verified.{extension}</c>.
+    /// Kept for existing callers; it forwards to <see cref="TextSnapshot.VerifyText"/>, which needs
+    /// no Roslyn reference and is the one to use in new code.
     /// </summary>
+    [RequiresUnreferencedCode(TextSnapshot.StackWalkReason)]
     public static void VerifyText(
         string content,
         string extension = "txt",
         [CallerFilePath] string testFilePath = "",
         [CallerMemberName] string testMethod = "")
-    {
-        var test = ResolveTest(testFilePath, testMethod);
-        var dir = EnsureSnapshotDirectory();
-        var prefix = Prefix(test.File, test.Method);
-        var fileName = $"{prefix}.verified.{extension}";
-
-        var failures = new List<string>();
-        Compare(Path.Combine(dir, fileName), Normalise(content ?? string.Empty), extension, IsUpdate(), failures);
-        Throw(prefix, failures);
-    }
-
-    private static void Compare(string path, string expected, string extension, bool update, List<string> failures)
-    {
-        var fileName = Path.GetFileName(path);
-
-        if (update)
-        {
-            File.WriteAllText(path, expected, Utf8Bom);
-            return;
-        }
-
-        if (!File.Exists(path))
-        {
-            WriteReceived(path, expected, extension);
-            failures.Add($"missing snapshot '{fileName}' (a .received.{extension} was written alongside it)");
-            return;
-        }
-
-        var actual = Normalise(File.ReadAllText(path));
-        if (string.Equals(actual, expected, StringComparison.Ordinal))
-        {
-            DeleteReceived(path, extension);
-            return;
-        }
-
-        WriteReceived(path, expected, extension);
-        failures.Add($"snapshot '{fileName}' differs:{Environment.NewLine}{Diff(actual, expected)}");
-    }
-
-    /// <summary>
-    /// Snapshots live in a Snapshots folder directly under the test project, in every repo —
-    /// including ones whose test classes sit in subfolders, where the test file's own directory
-    /// would be wrong. Resolving from the project rather than from the caller path also means
-    /// deterministic builds, which rewrite source paths to /_/... , need no special handling.
-    /// </summary>
-    private static string EnsureSnapshotDirectory()
-    {
-        var dir = Path.Combine(FindProjectDirectory(), SnapshotDirectory);
-        Directory.CreateDirectory(dir);
-        return dir;
-    }
-
-    /// <summary>Walks up from the test binaries to the directory holding the .csproj.</summary>
-    private static string FindProjectDirectory()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
-        {
-            if (dir.GetFiles("*.csproj").Length > 0)
-                return dir.FullName;
-            dir = dir.Parent;
-        }
-
-        throw new InvalidOperationException(
-            "Could not locate the test project directory from " + AppContext.BaseDirectory +
-            ". Snapshot paths cannot be resolved under a deterministic build without it.");
-    }
-
-    /// <summary>
-    /// Finds the [Fact]/[Theory] frame rather than trusting the caller attributes.
-    ///
-    /// Several repos route every test through a shared private wrapper, and
-    /// CallerMemberName then reports the wrapper's name for all of them, collapsing every
-    /// snapshot onto one prefix. Verify read the test name from the framework context; this
-    /// walks the stack for the equivalent.
-    /// </summary>
-    private static (string File, string Method) ResolveTest(string callerFile, string callerMember)
-    {
-        var trace = new StackTrace(fNeedFileInfo: true);
-        for (var i = 0; i < trace.FrameCount; i++)
-        {
-            var frame = trace.GetFrame(i);
-            var method = frame?.GetMethod();
-            if (method is null) continue;
-
-            // foreach over the array and an indexed loop over the List below: the two are not
-            // interchangeable here. This file ships as source and compiles inside every consumer,
-            // so it has to satisfy the union of their analyzers -- HLQ013 wants foreach for an
-            // array, HLQ012 wants indexed access for a List.
-            foreach (var attribute in method.GetCustomAttributes(inherit: false))
-            {
-                var name = attribute.GetType().Name;
-                if (!string.Equals(name, "FactAttribute", StringComparison.Ordinal)
-                    && !string.Equals(name, "TheoryAttribute", StringComparison.Ordinal))
-                    continue;
-
-                var file = frame!.GetFileName();
-                return (string.IsNullOrEmpty(file) ? callerFile : file, method.Name);
-            }
-        }
-
-        // No test frame (a helper invoked outside a test): the caller attributes are correct.
-        return (callerFile, callerMember);
-    }
-
-    private static string Prefix(string testFilePath, string testMethod)
-        => $"{Path.GetFileNameWithoutExtension(testFilePath)}.{testMethod}";
-
-    /// <summary>Snapshots are stored with LF so they compare equal whatever wrote them.</summary>
-    private static string Normalise(string text)
-        => text.Replace("\r\n", "\n", StringComparison.Ordinal);
-
-    private static bool IsUpdate()
-        => string.Equals(Environment.GetEnvironmentVariable(UpdateEnvVar), "1", StringComparison.Ordinal);
-
-    private static void WriteReceived(string verifiedPath, string content, string extension)
-        => File.WriteAllText(ReceivedPath(verifiedPath, extension), content, Utf8Bom);
-
-    private static void DeleteReceived(string verifiedPath, string extension)
-    {
-        var received = ReceivedPath(verifiedPath, extension);
-        if (File.Exists(received)) File.Delete(received);
-    }
-
-    private static string ReceivedPath(string verifiedPath, string extension)
-        => verifiedPath.Replace($".verified.{extension}", $".received.{extension}", StringComparison.Ordinal);
-
-    private static void Throw(string prefix, List<string> failures)
-    {
-        if (failures.Count == 0) return;
-
-        throw new InvalidOperationException(
-            $"Snapshot mismatch for {prefix}:{Environment.NewLine}" +
-            string.Join(Environment.NewLine, failures) +
-            $"{Environment.NewLine}Re-run with {UpdateEnvVar}=1 to accept the current output.");
-    }
-
-    /// <summary>First differing line with a little context — enough to see what moved.</summary>
-    private static string Diff(string expected, string actual)
-    {
-        var e = expected.Split('\n');
-        var a = actual.Split('\n');
-        for (var i = 0; i < Math.Max(e.Length, a.Length); i++)
-        {
-            var el = i < e.Length ? e[i] : "<end of file>";
-            var al = i < a.Length ? a[i] : "<end of file>";
-            if (!string.Equals(el, al, StringComparison.Ordinal))
-            {
-                return $"  line {i + 1}:{Environment.NewLine}" +
-                       $"    verified: {el}{Environment.NewLine}" +
-                       $"    actual:   {al}";
-            }
-        }
-        return "  (files differ only in trailing content)";
-    }
+        => TextSnapshot.VerifyText(content, extension, testFilePath, testMethod);
 }
