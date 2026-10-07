@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.5.0...v1.5.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* settle the heap before the AllocationGate warmup, not after it ([#63](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/63)) ([425eb17](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/425eb17ac46f575f27d7a6ca7a36936a687ddc01)), closes [#62](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/62)
+
 ## [1.5.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.4.0...v1.5.0) (2026-10-02)
 
 
