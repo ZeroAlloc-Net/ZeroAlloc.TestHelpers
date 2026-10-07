@@ -20,7 +20,7 @@ internal static class AllocationGate
 
     /// <summary>
     /// The bytes one call of <paramref name="action"/> allocates, averaged over
-    /// <paramref name="iterations"/> calls after the same warmup and GC as the asserts. The
+    /// <paramref name="iterations"/> calls after the same GC and warmup as the asserts. The
     /// average is rounded up, so a call that allocates at all never reads as zero.
     /// </summary>
     public static long MeasureBytesPerCall(int iterations, Action action)
@@ -73,11 +73,11 @@ internal static class AllocationGate
 
     private static long MeasureTotal(int iterations, Action action)
     {
-        // Warmup — JIT-compile, populate type-handle caches, allocate one-time fixtures.
-        action();
-        action();
+        SettleHeap();
 
-        FlushWarmupGarbage();
+        // Warmup — JIT-compile, populate type-handle caches and pools, allocate one-time fixtures.
+        action();
+        action();
 
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < iterations; i++) action();
@@ -86,11 +86,11 @@ internal static class AllocationGate
 
     private static long MeasureTotalValueTask<T>(int iterations, Func<ValueTask<T>> action)
     {
+        SettleHeap();
+
         // Warmup.
         Drain(action());
         Drain(action());
-
-        FlushWarmupGarbage();
 
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < iterations; i++) Drain(action());
@@ -109,12 +109,20 @@ internal static class AllocationGate
         return t.Result;
     }
 
-    // Flush warmup garbage so it can't leak into the measurement.
-    private static void FlushWarmupGarbage()
+    // Runs before the warmup, never between it and the measurement (#62). A full GC triggers the
+    // pool trims that run from finalizers, such as ArrayPool.Shared's Gen2GcCallback, and under
+    // high memory load they drop every pooled array. Collecting after the warmup emptied the pools
+    // it had just filled, so the measurement counted their refill. Each collection's finalizers are
+    // awaited, so no trim is still running on the finalizer thread once the warmup starts.
+    //
+    // Warmup garbage needs no collecting: the allocation counter counts what is allocated, not
+    // what survives.
+    private static void SettleHeap()
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
+        GC.WaitForPendingFinalizers();
     }
 
     // Rounded up: integer division would report an occasional small allocation as 0 B/call.

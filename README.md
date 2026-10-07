@@ -38,9 +38,10 @@ To override the check, set `ZeroAllocTestHelpersIncludeGeneratorSnapshot`:
 
 ### AllocationGate
 
-- `AllocationGate.AssertBudget(int budgetBytes, int iterations, Action action, string label)` runs `action` `iterations` times after a warmup and a forced GC. It throws `InvalidOperationException` if total allocations exceed `budgetBytes * iterations`.
+- `AllocationGate.AssertBudget(int budgetBytes, int iterations, Action action, string label)` runs `action` `iterations` times after a forced GC and then a warmup. It throws `InvalidOperationException` if total allocations exceed `budgetBytes * iterations`.
 - `AllocationGate.AssertBudgetValueTask<T>(int budgetBytes, int iterations, Func<ValueTask<T>> action, string label)` is the same check for APIs that return `ValueTask<T>`. It throws if the supplied `ValueTask<T>` did not complete synchronously, because awaiter machinery would pollute the measurement.
-- `AllocationGate.MeasureBytesPerCall(int iterations, Action action)` and `AllocationGate.MeasureBytesPerCallValueTask<T>(int iterations, Func<ValueTask<T>> action)` return the bytes one call allocates, after the same warmup and forced GC. The average is rounded up, so a call that allocates at all never reads as 0.
+- `AllocationGate.MeasureBytesPerCall(int iterations, Action action)` and `AllocationGate.MeasureBytesPerCallValueTask<T>(int iterations, Func<ValueTask<T>> action)` return the bytes one call allocates, after the same forced GC and warmup. The average is rounded up, so a call that allocates at all never reads as 0.
+- The forced GC comes before the warmup, so a pool that a GC trims, such as `ArrayPool.Shared` under high memory load, is refilled by the warmup and not by the measured calls.
 - `AllocationGate.AssertNoMoreThan(int iterations, Action baseline, Action candidate, string label)` and `AllocationGate.AssertNoMoreThanValueTask<T>(...)` measure both paths in the same run. They throw if `candidate` allocates more in total than `baseline`. Use them for relative gates, such as "a DI-resolved client allocates no more than a hand-built one".
 
 ### TextSnapshot
