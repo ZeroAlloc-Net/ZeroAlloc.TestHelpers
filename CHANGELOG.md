@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.5.1...v1.6.0) (2026-10-10)
+
+
+### Features
+
+* declare ZeroAlloc.TestHelpers as not AOT-compatible ([#66](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/66)) ([dd9f6b8](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/dd9f6b8e64214fb01c7b19a4b91ae2d4f7827db7))
+
 ## [1.5.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.5.0...v1.5.1) (2026-10-07)
 
 
