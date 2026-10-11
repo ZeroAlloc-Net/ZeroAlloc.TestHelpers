@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.6.0...v1.6.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* make AllocationGate.cs compile without ImplicitUsings ([#69](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/69)) ([7431a66](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/7431a668c6541fe0adb759638b3714f6257c4d5b))
+
 ## [1.6.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.5.1...v1.6.0) (2026-10-10)
 
 
