@@ -2,11 +2,13 @@
   <!--
     Deliberately does not import the repository's Directory.Build.props: these projects stand in
     for external consumers of the packed nupkg, so they must not inherit this repo's settings.
-    They do keep the strictness consumers use, since the package source compiles under it.
+    They keep the strictness consumers use, since the package source compiles under it, and they
+    disable ImplicitUsings (#68): the content files compile inside the consumer and must not rely
+    on its global usings. AllocationGateOnly also turns Nullable off, so both settings are covered.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
+    <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <IsPackable>false</IsPackable>

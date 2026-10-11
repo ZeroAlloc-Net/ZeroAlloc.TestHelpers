@@ -5,6 +5,7 @@
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <Nullable>disable</Nullable>
     <PublishAot>true</PublishAot>
   </PropertyGroup>
   <ItemGroup>

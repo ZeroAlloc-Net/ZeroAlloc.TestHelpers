@@ -1,3 +1,5 @@
+using System;
+using System.Threading.Tasks;
 using ZeroAlloc.TestHelpers;
 
 AllocationGate.AssertBudget(0, 1_000, static () => { }, "no-op");
