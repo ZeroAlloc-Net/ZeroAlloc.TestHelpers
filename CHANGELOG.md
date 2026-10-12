@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.2](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.6.1...v1.6.2) (2026-10-12)
+
+
+### Refactors
+
+* drop the HLQ012 and HLQ013 loop-shape comment ([#71](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/71)) ([04eec68](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/04eec685de7ba3e82f2bdca25ef7b77e9969bf35))
+
 ## [1.6.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.6.0...v1.6.1) (2026-10-11)
 
 
