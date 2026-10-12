@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.6.2...v1.7.0) (2026-10-12)
+
+
+### Features
+
+* add AllocationGate methods for calls that complete asynchronously ([#73](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/73)) ([d9fc1e9](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/d9fc1e902f1c249cfe672591565be4a1afc67ebe)), closes [#65](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/65)
+
 ## [1.6.2](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.6.1...v1.6.2) (2026-10-12)
 
 
