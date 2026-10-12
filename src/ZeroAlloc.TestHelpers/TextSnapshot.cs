@@ -134,10 +134,6 @@ internal static class TextSnapshot
             var method = frame?.GetMethod();
             if (method is null) continue;
 
-            // foreach over the array and an indexed loop over the List below: the two are not
-            // interchangeable here. This file ships as source and compiles inside every consumer,
-            // so it has to satisfy the union of their analyzers -- HLQ013 wants foreach for an
-            // array, HLQ012 wants indexed access for a List.
             foreach (var attribute in method.GetCustomAttributes(inherit: false))
             {
                 var name = attribute.GetType().Name;
