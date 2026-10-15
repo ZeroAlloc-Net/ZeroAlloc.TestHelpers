@@ -1,5 +1,10 @@
 # ZeroAlloc.TestHelpers
 
+[![NuGet](https://img.shields.io/nuget/v/ZeroAlloc.TestHelpers.svg)](https://www.nuget.org/packages/ZeroAlloc.TestHelpers)
+[![Build](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/actions/workflows/ci.yml/badge.svg)](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/blob/main/LICENSE)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/MarcelRoozekrans?style=flat&logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/MarcelRoozekrans)
+
 Source-distributed test helpers for the ZeroAlloc.* ecosystem.
 
 ## Usage
@@ -62,9 +67,15 @@ For a call that really yields, such as one that awaits I/O, use the `Async` meth
 Each method also has an overload that takes `Func<ValueTask<T>>`. For an API that returns `Task`, pass `() => new ValueTask(client.SendAsync())`; wrapping a `Task` in a `ValueTask` allocates nothing.
 
 ```csharp
+using ZeroAlloc.TestHelpers;
+
 [Collection("allocation gates")] // a collection with DisableParallelization = true
 public sealed class ClientAllocationTests
 {
+    // Your client and a request for it; SendAsync returns ValueTask.
+    private readonly OrderClient _client = new();
+    private readonly OrderRequest _request = new();
+
     [Fact]
     public Task Send_allocates_nothing_when_the_server_answers_asynchronously() =>
         AllocationGate.AssertBudgetAsync(0, 1_000, () => _client.SendAsync(_request), "Send");
