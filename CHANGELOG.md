@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.7.0...v1.7.1) (2026-10-15)
+
+
+### Documentation
+
+* add the standard badges and complete the async gate sample ([#77](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/77)) ([61b00ce](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/61b00ce325b1a6299c9b86fe2095cb192c8e1aeb))
+
 ## [1.7.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.6.2...v1.7.0) (2026-10-12)
 
 
