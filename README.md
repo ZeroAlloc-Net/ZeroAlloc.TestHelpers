@@ -10,7 +10,7 @@ Prove "zero allocation" in a unit test: exact per-call allocation budgets that f
 ## Why ZeroAlloc.TestHelpers
 
 - **A claim becomes a test.** `AllocationGate` runs a call as many times as you ask and fails if it allocates more bytes per call than you allow. A BenchmarkDotNet `[MemoryDiagnoser]` run shows a number; this gate fails CI when the number changes.
-- **Exact counts.** Synchronous gates count with `GC.GetAllocatedBytesForCurrentThread` after a forced GC and a warmup, and round the average up, so a call that allocates at all never reads as 0 B.
+- **Exact counts.** Synchronous gates count with `GC.GetAllocatedBytesForCurrentThread` after a forced GC and a warmup, keep the least of three windows so a one-off allocation is not counted, and round the average up, so a recurring allocation never reads as 0 B.
 - **Async calls too.** The `Async` gates await every call and count allocations on every thread, for code that really yields on I/O.
 - **Source-only, nothing to ship.** The helpers compile into your test project as `internal` classes: no runtime DLL, nothing on your public API, and `AllocationGate` compiles into a NativeAOT app; CI publishes one with it.
 
@@ -45,7 +45,7 @@ public class FormattingTests
 Put `12_345.ToString()` under the zero budget and the test fails with the exact cost:
 
 ```text
-AllocationGate: ToString allocated 32000 B total over 1000 iterations (~32 B/call avg), budget is 0 B/call (0 B total).
+AllocationGate: ToString allocated 32000 B total over 1000 iterations (32 B/call avg, the least of 3 windows), budget is 0 B/call (0 B total).
 ```
 
 ## What you get

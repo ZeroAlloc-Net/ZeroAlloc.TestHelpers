@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -24,7 +25,9 @@ internal static class AllocationGate
 
     /// <summary>
     /// The bytes one call of <paramref name="action"/> allocates, averaged over
-    /// <paramref name="iterations"/> calls after the same GC and warmup as the asserts. The
+    /// <paramref name="iterations"/> calls after the same GC and warmup as the asserts: the least
+    /// of three windows of <paramref name="iterations"/> calls, after
+    /// <see cref="DefaultAsyncWarmup"/> warmup calls, so a one-off allocation is not counted. The
     /// average is rounded up, so a call that allocates at all never reads as zero.
     /// </summary>
     public static long MeasureBytesPerCall(int iterations, Action action)
@@ -92,7 +95,7 @@ internal static class AllocationGate
     //      touches fill its thread-local caches and lets the methods involved tier up;
     //   4. before each window, it waits until no thread has allocated for a short quiet period,
     //      so a window does not start inside another thread's burst of allocations;
-    //   5. AsyncWindows windows of `iterations` calls each are measured, and the least is kept.
+    //   5. MeasuredWindows windows of `iterations` calls each are measured, and the least is kept.
     //      The counter only grows, so another thread's allocations can only add to a window,
     //      never subtract: the quietest window is the closest to what the calls alone allocate;
     //   6. the asserts allow a per-call tolerance, DefaultAsyncToleranceBytesPerCall by default,
@@ -100,9 +103,9 @@ internal static class AllocationGate
     // ---------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The number of warmup calls the asynchronous gates make when none is given. Thread-pool
-    /// threads fill their thread-local caches one at a time, so a short warmup measures their
-    /// first rents.
+    /// The number of warmup calls the asynchronous gates make when none is given, and the number
+    /// the synchronous gates always make. Thread-pool threads fill their thread-local caches one
+    /// at a time, so a short warmup measures their first rents.
     /// </summary>
     public const int DefaultAsyncWarmup = 2_000;
 
@@ -114,8 +117,8 @@ internal static class AllocationGate
     /// </summary>
     public const int DefaultAsyncToleranceBytesPerCall = 8;
 
-    // The number of measured windows; the least is reported.
-    private const int AsyncWindows = 3;
+    // The number of measured windows, for the synchronous gates too; the least is reported.
+    private const int MeasuredWindows = 3;
 
     // Before each window: how long no thread may allocate, and how long to wait for that.
     private const int QuietPeriodMilliseconds = 10;
@@ -292,7 +295,7 @@ internal static class AllocationGate
         {
             throw new InvalidOperationException(
                 $"AllocationGate: {label} allocated {allocated} B total over {iterations} iterations " +
-                $"(~{PerCall(allocated, iterations)} B/call avg, the least of {AsyncWindows} windows, " +
+                $"({FormatPerCall(allocated, iterations)} B/call avg, the least of {MeasuredWindows} windows, " +
                 $"counted on every thread), budget is {budgetBytes} B/call plus a tolerance of " +
                 $"{toleranceBytesPerCall} B/call ({totalBudget} B total). " +
                 "Use BenchmarkDotNet [MemoryDiagnoser] locally to find the culprit.");
@@ -312,9 +315,9 @@ internal static class AllocationGate
         {
             throw new InvalidOperationException(
                 $"AllocationGate: {label} candidate allocated {candidateTotal} B total over {iterations} iterations " +
-                $"(~{PerCall(candidateTotal, iterations)} B/call avg), baseline allocated {baselineTotal} B total " +
-                $"(~{PerCall(baselineTotal, iterations)} B/call avg), with a tolerance of {toleranceBytesPerCall} B/call. " +
-                $"Each is the least of {AsyncWindows} windows, counted on every thread. " +
+                $"({FormatPerCall(candidateTotal, iterations)} B/call avg), baseline allocated {baselineTotal} B total " +
+                $"({FormatPerCall(baselineTotal, iterations)} B/call avg), with a tolerance of {toleranceBytesPerCall} B/call. " +
+                $"Each is the least of {MeasuredWindows} windows, counted on every thread. " +
                 "Use BenchmarkDotNet [MemoryDiagnoser] locally to find the culprit.");
         }
     }
@@ -348,7 +351,7 @@ internal static class AllocationGate
         for (int i = 0; i < warmup; i++) await action().ConfigureAwait(false);
 
         var least = long.MaxValue;
-        for (int window = 0; window < AsyncWindows; window++)
+        for (int window = 0; window < MeasuredWindows; window++)
         {
             WaitForQuietProcess();
             var before = GC.GetTotalAllocatedBytes(precise: true);
@@ -367,7 +370,7 @@ internal static class AllocationGate
         for (int i = 0; i < warmup; i++) _ = await action().ConfigureAwait(false);
 
         var least = long.MaxValue;
-        for (int window = 0; window < AsyncWindows; window++)
+        for (int window = 0; window < MeasuredWindows; window++)
         {
             WaitForQuietProcess();
             var before = GC.GetTotalAllocatedBytes(precise: true);
@@ -377,30 +380,46 @@ internal static class AllocationGate
         return least;
     }
 
+    // The synchronous gates warm up and measure as the asynchronous ones do (#84): the same
+    // DefaultAsyncWarmup warmup calls, then MeasuredWindows windows of `iterations` calls, keeping
+    // the least. They need no quiescence wait, because the thread-local counter does not see what
+    // other threads allocate, but the call itself can still allocate once inside a window: a type
+    // or static initializer, a lazily filled cache or fixture, a pool growing on first use. The
+    // counter only grows, so such a one-off can only add to the window it lands in. An allocation
+    // that recurs every call, or every few calls, lands in every window and is still counted, so
+    // an exact budget stays exact.
     private static long MeasureTotal(int iterations, Action action)
     {
         SettleHeap();
 
-        // Warmup — JIT-compile, populate type-handle caches and pools, allocate one-time fixtures.
-        action();
-        action();
+        // Warmup: JIT-compile and tier up, populate type-handle caches and pools, allocate
+        // one-time fixtures.
+        for (int i = 0; i < DefaultAsyncWarmup; i++) action();
 
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < iterations; i++) action();
-        return GC.GetAllocatedBytesForCurrentThread() - before;
+        var least = long.MaxValue;
+        for (int window = 0; window < MeasuredWindows; window++)
+        {
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < iterations; i++) action();
+            least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+        return least;
     }
 
     private static long MeasureTotalValueTask<T>(int iterations, Func<ValueTask<T>> action)
     {
         SettleHeap();
 
-        // Warmup.
-        Drain(action());
-        Drain(action());
+        for (int i = 0; i < DefaultAsyncWarmup; i++) Drain(action());
 
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < iterations; i++) Drain(action());
-        return GC.GetAllocatedBytesForCurrentThread() - before;
+        var least = long.MaxValue;
+        for (int window = 0; window < MeasuredWindows; window++)
+        {
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < iterations; i++) Drain(action());
+            least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+        return least;
     }
 
     private static T Drain<T>(ValueTask<T> t)
@@ -434,8 +453,21 @@ internal static class AllocationGate
     }
 
     // Rounded up: integer division would report an occasional small allocation as 0 B/call.
+    // Only the measurements return this; the asserts compare totals and never round.
     private static long PerCall(long allocated, int iterations) =>
         (allocated + iterations - 1) / iterations;
+
+    // The exact average, for messages. A total that is not a whole number of bytes per call comes
+    // from an allocation that does not happen on every call, and rounding it up would hide that:
+    // 752 B over 1000 calls is 0.752 B/call, not the 1 B/call that no object is small enough to
+    // be. Truncated to three decimals, so a fraction never reads as the next whole number.
+    private static string FormatPerCall(long allocated, int iterations)
+    {
+        var perCall = Math.Truncate((decimal)allocated * 1000 / iterations) / 1000;
+        return perCall == 0 && allocated > 0
+            ? "<0.001"
+            : perCall.ToString("0.###", CultureInfo.InvariantCulture);
+    }
 
     private static void ThrowIfOverBudget(int budgetBytes, int iterations, long allocated, string label)
     {
@@ -444,7 +476,8 @@ internal static class AllocationGate
         {
             throw new InvalidOperationException(
                 $"AllocationGate: {label} allocated {allocated} B total over {iterations} iterations " +
-                $"(~{PerCall(allocated, iterations)} B/call avg), budget is {budgetBytes} B/call ({totalBudget} B total). " +
+                $"({FormatPerCall(allocated, iterations)} B/call avg, the least of {MeasuredWindows} windows), " +
+                $"budget is {budgetBytes} B/call ({totalBudget} B total). " +
                 "Use BenchmarkDotNet [MemoryDiagnoser] locally to find the culprit.");
         }
     }
@@ -455,8 +488,9 @@ internal static class AllocationGate
         {
             throw new InvalidOperationException(
                 $"AllocationGate: {label} candidate allocated {candidateTotal} B total over {iterations} iterations " +
-                $"(~{PerCall(candidateTotal, iterations)} B/call avg), baseline allocated {baselineTotal} B total " +
-                $"(~{PerCall(baselineTotal, iterations)} B/call avg). " +
+                $"({FormatPerCall(candidateTotal, iterations)} B/call avg), baseline allocated {baselineTotal} B total " +
+                $"({FormatPerCall(baselineTotal, iterations)} B/call avg). " +
+                $"Each is the least of {MeasuredWindows} windows. " +
                 "Use BenchmarkDotNet [MemoryDiagnoser] locally to find the culprit.");
         }
     }
