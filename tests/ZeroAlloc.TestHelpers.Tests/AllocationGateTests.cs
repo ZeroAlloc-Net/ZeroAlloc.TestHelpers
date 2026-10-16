@@ -17,7 +17,7 @@ public sealed class AllocationGateTests
             action: () => { counter++; },
             label: "zero-alloc counter increment");
 
-        Assert.Equal(102, counter); // 2 warmup + 100 measured
+        Assert.Equal(AllocationGate.DefaultAsyncWarmup + (3 * 100), counter); // warmup + 3 windows
     }
 
     [Fact]
@@ -27,7 +27,7 @@ public sealed class AllocationGateTests
             AllocationGate.AssertBudget(
                 budgetBytes: 0,
                 iterations: 10,
-                action: () => _ = new byte[1024], // 1 KiB per call
+                action: () => Escape.Sink = new byte[1024], // 1 KiB per call
                 label: "deliberate allocator"));
 
         Assert.Contains("deliberate allocator", ex.Message, StringComparison.Ordinal);
@@ -45,7 +45,7 @@ public sealed class AllocationGateTests
             action: () => { counter++; return new ValueTask<int>(42); },
             label: "zero-alloc sync-completed ValueTask");
 
-        Assert.Equal(102, counter);
+        Assert.Equal(AllocationGate.DefaultAsyncWarmup + (3 * 100), counter);
     }
 
     [Fact]
@@ -75,13 +75,13 @@ public sealed class AllocationGateTests
         var perCall = AllocationGate.MeasureBytesPerCall(100, () => { counter++; });
 
         Assert.Equal(0, perCall);
-        Assert.Equal(102, counter); // 2 warmup + 100 measured
+        Assert.Equal(AllocationGate.DefaultAsyncWarmup + (3 * 100), counter); // warmup + 3 windows
     }
 
     [Fact]
     public void MeasureBytesPerCall_Allocating_ReturnsPerCallBytes()
     {
-        var perCall = AllocationGate.MeasureBytesPerCall(10, () => _ = new byte[1024]);
+        var perCall = AllocationGate.MeasureBytesPerCall(10, () => Escape.Sink = new byte[1024]);
 
         // The array's payload plus its object header.
         Assert.InRange(perCall, 1024, 1024 + 64);
@@ -96,7 +96,7 @@ public sealed class AllocationGateTests
         var perCall = AllocationGate.MeasureBytesPerCall(1000, () =>
         {
             if (++counter % 100 == 0)
-                _ = new byte[16];
+                Escape.Sink = new byte[16];
         });
 
         Assert.Equal(1, perCall);
@@ -122,8 +122,10 @@ public sealed class AllocationGateTests
     }
 
     [Fact]
-    public void AssertBudget_OverBudget_ReportsRoundedUpPerCallAverage()
+    public void AssertBudget_OverBudget_ReportsTheExactPerCallAverage()
     {
+        // A 40 B array every hundred calls is 0.4 B/call. Rounded up it would read as 1 B/call,
+        // which no object is small enough to be.
         long counter = 0;
         var ex = Assert.Throws<InvalidOperationException>(() =>
             AllocationGate.AssertBudget(
@@ -132,11 +134,30 @@ public sealed class AllocationGateTests
                 action: () =>
                 {
                     if (++counter % 100 == 0)
-                        _ = new byte[16];
+                        Escape.Sink = new byte[16];
                 },
                 label: "occasional allocator"));
 
-        Assert.Contains("~1 B/call avg", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("allocated 400 B total over 1000 iterations (0.4 B/call avg, the least of 3 windows)", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AssertBudget_OverBudget_ReportsATinyAverageAsNonZero()
+    {
+        // 40 B over 100,000 calls is 0.0004 B/call, below the three decimals shown.
+        long counter = 0;
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            AllocationGate.AssertBudget(
+                budgetBytes: 0,
+                iterations: 100_000,
+                action: () =>
+                {
+                    if (++counter % 100_000 == 0)
+                        Escape.Sink = new byte[16];
+                },
+                label: "rare allocator"));
+
+        Assert.Contains("(<0.001 B/call avg", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -144,8 +165,8 @@ public sealed class AllocationGateTests
     {
         AllocationGate.AssertNoMoreThan(
             iterations: 10,
-            baseline: () => _ = new byte[256],
-            candidate: () => _ = new byte[256],
+            baseline: () => Escape.Sink = new byte[256],
+            candidate: () => Escape.Sink = new byte[256],
             label: "same allocation");
     }
 
@@ -156,7 +177,7 @@ public sealed class AllocationGateTests
             AllocationGate.AssertNoMoreThan(
                 iterations: 10,
                 baseline: () => { },
-                candidate: () => _ = new byte[256],
+                candidate: () => Escape.Sink = new byte[256],
                 label: "DI-resolved vs hand-built"));
 
         Assert.Contains("DI-resolved vs hand-built", ex.Message, StringComparison.Ordinal);
@@ -171,7 +192,7 @@ public sealed class AllocationGateTests
             AllocationGate.AssertNoMoreThanValueTask(
                 iterations: 10,
                 baseline: () => new ValueTask<int>(1),
-                candidate: () => new ValueTask<int>(new byte[256].Length),
+                candidate: () => { Escape.Sink = new byte[256]; return new ValueTask<int>(1); },
                 label: "ValueTask paths"));
 
         Assert.Contains("ValueTask paths", ex.Message, StringComparison.Ordinal);
