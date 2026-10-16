@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.3](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.7.2...v1.7.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* measure the sync allocation gate over several windows after a longer warmup ([#87](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/87)) ([223448e](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/223448eddd3cc1a8c7cf69018346ab8528f14346)), closes [#84](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/84)
+
 ## [1.7.2](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.7.1...v1.7.2) (2026-10-16)
 
 
