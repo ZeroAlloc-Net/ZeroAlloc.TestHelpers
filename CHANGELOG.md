@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.7.1...v1.7.2) (2026-10-16)
+
+
+### Documentation
+
+* rewrite the readme as a product page ([#80](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/80)) ([86633cf](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/86633cf618e8b8ab460746a51839799663bdf0be))
+
 ## [1.7.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.7.0...v1.7.1) (2026-10-15)
 
 
