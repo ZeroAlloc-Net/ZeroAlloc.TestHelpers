@@ -17,7 +17,8 @@ public sealed class AllocationGateTests
             action: () => { counter++; },
             label: "zero-alloc counter increment");
 
-        Assert.Equal(AllocationGate.DefaultAsyncWarmup + (3 * 100), counter); // warmup + 3 windows
+        // A passing gate stops after the first two windows that agree: warmup + 2 windows.
+        Assert.Equal(AllocationGate.DefaultAsyncWarmup + (2 * 100), counter);
     }
 
     [Fact]
@@ -45,7 +46,7 @@ public sealed class AllocationGateTests
             action: () => { counter++; return new ValueTask<int>(42); },
             label: "zero-alloc sync-completed ValueTask");
 
-        Assert.Equal(AllocationGate.DefaultAsyncWarmup + (3 * 100), counter);
+        Assert.Equal(AllocationGate.DefaultAsyncWarmup + (2 * 100), counter);
     }
 
     [Fact]
@@ -74,8 +75,15 @@ public sealed class AllocationGateTests
         long counter = 0;
         var perCall = AllocationGate.MeasureBytesPerCall(100, () => { counter++; });
 
+        // A measurement without a budget runs until the JIT has settled, in whole windows.
         Assert.Equal(0, perCall);
-        Assert.Equal(AllocationGate.DefaultAsyncWarmup + (3 * 100), counter); // warmup + 3 windows
+        Assert.Equal(0, (counter - AllocationGate.DefaultAsyncWarmup) % 100);
+        Assert.True(counter >= AllocationGate.DefaultAsyncWarmup + (2 * 100), $"made only {counter} calls");
+
+        // While it waits for tiered compilation, it pauses 10 ms between windows, so even at the
+        // timeout it has made a few hundred windows, not hundreds of thousands.
+        var mostWindows = 2 + (AllocationGate.StabilityTimeoutMilliseconds / 10);
+        Assert.True(counter <= AllocationGate.DefaultAsyncWarmup + (mostWindows * 100), $"made {counter} calls");
     }
 
     [Fact]
@@ -105,8 +113,14 @@ public sealed class AllocationGateTests
     [Fact]
     public void MeasureBytesPerCallValueTask_SyncCompleted_ReturnsPerCallBytes()
     {
-        var perCall = AllocationGate.MeasureBytesPerCallValueTask(
-            10, () => new ValueTask<byte[]>(new byte[1024]));
+        // The array escapes to a field: the gate discards the result, so the optimised code it
+        // measures could otherwise allocate the array on the stack and read 0 B.
+        var perCall = AllocationGate.MeasureBytesPerCallValueTask(10, () =>
+        {
+            var array = new byte[1024];
+            Escape.Sink = array;
+            return new ValueTask<byte[]>(array);
+        });
 
         Assert.InRange(perCall, 1024, 1024 + 64);
     }
@@ -138,7 +152,7 @@ public sealed class AllocationGateTests
                 },
                 label: "occasional allocator"));
 
-        Assert.Contains("allocated 400 B total over 1000 iterations (0.4 B/call avg, the least of 3 windows)", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("allocated 400 B total over 1000 iterations (0.4 B/call avg, the least of ", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

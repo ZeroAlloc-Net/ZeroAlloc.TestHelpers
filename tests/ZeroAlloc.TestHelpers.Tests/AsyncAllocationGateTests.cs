@@ -77,7 +77,7 @@ public sealed class AsyncAllocationGateTests
     }
 
     [Fact]
-    public async Task MeasureBytesPerCallAsync_RunsWarmupThenThreeWindows()
+    public async Task MeasureBytesPerCallAsync_RunsWarmupThenWholeWindows()
     {
         long calls = 0;
         _ = await AllocationGate.MeasureBytesPerCallAsync(10, 7, () =>
@@ -86,7 +86,9 @@ public sealed class AsyncAllocationGateTests
             return default;
         });
 
-        Assert.Equal(7 + (3 * 10), calls);
+        // The warmup, then at least two windows of 10 calls; how many depends on the JIT.
+        Assert.Equal(0, (calls - 7) % 10);
+        Assert.True(calls >= 7 + (2 * 10), $"made only {calls} calls");
     }
 
     [Fact]
@@ -99,7 +101,8 @@ public sealed class AsyncAllocationGateTests
             return default;
         });
 
-        Assert.Equal(AllocationGate.DefaultAsyncWarmup + (3 * 10), calls);
+        Assert.Equal(0, (calls - AllocationGate.DefaultAsyncWarmup) % 10);
+        Assert.True(calls >= AllocationGate.DefaultAsyncWarmup + (2 * 10), $"made only {calls} calls");
     }
 
     [Fact]
