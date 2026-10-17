@@ -52,7 +52,7 @@ jobs:
         run: dotnet test --configuration Release --no-build --verbosity normal --settings coverage.runsettings --results-directory TestResults
       - name: Upload coverage to Codecov
         if: '!cancelled()'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: "TestResults/**/coverage.cobertura.xml"
