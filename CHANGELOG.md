@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.7.3...v1.8.0) (2026-10-17)
+
+
+### Features
+
+* measure allocation gates until the measurement is stable ([#90](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/90)) ([d1810a6](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/d1810a6eb619099327d147b5729dd902a5fb3293)), closes [#89](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/89)
+
 ## [1.7.3](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.7.2...v1.7.3) (2026-10-16)
 
 
