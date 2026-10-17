@@ -2,6 +2,7 @@
 
 [![NuGet](https://img.shields.io/nuget/v/ZeroAlloc.TestHelpers.svg)](https://www.nuget.org/packages/ZeroAlloc.TestHelpers)
 [![Build](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/actions/workflows/ci.yml/badge.svg)](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/ZeroAlloc-Net/ZeroAlloc.TestHelpers/graph/badge.svg)](https://codecov.io/gh/ZeroAlloc-Net/ZeroAlloc.TestHelpers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/blob/main/LICENSE)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/MarcelRoozekrans?style=flat&logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/MarcelRoozekrans)
 
