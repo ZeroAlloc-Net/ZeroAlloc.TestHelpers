@@ -185,6 +185,121 @@ public sealed class StableMeasurementTests
     }
 
     [Fact]
+    public async Task AssertNoMoreThanAsync_EqualCalls_AreMeasuredOverTheSameWindows()
+    {
+        // The two sides run in alternating windows and stop together (#76). One after the other,
+        // the baseline kept measuring until its own windows agreed, the candidate stopped at the
+        // first window within the baseline, and the side with more windows kept the lower least:
+        // equal calls then differed by more than the tolerance about one run in a hundred.
+        long baselineCalls = 0;
+        long candidateCalls = 0;
+
+        await AllocationGate.AssertNoMoreThanAsync(
+            Iterations,
+            () =>
+            {
+                baselineCalls++;
+                Escape.Sink = new byte[40];
+                return default;
+            },
+            () =>
+            {
+                candidateCalls++;
+                Escape.Sink = new byte[40];
+                return default;
+            },
+            "equal calls");
+
+        Assert.Equal(baselineCalls, candidateCalls);
+    }
+
+    [Fact]
+    public async Task AssertNoMoreThanAsync_EqualValueTaskCalls_AreMeasuredOverTheSameWindows()
+    {
+        long baselineCalls = 0;
+        long candidateCalls = 0;
+
+        await AllocationGate.AssertNoMoreThanAsync(
+            Iterations,
+            () =>
+            {
+                baselineCalls++;
+                Escape.Sink = new byte[40];
+                return new ValueTask<int>(1);
+            },
+            () =>
+            {
+                candidateCalls++;
+                Escape.Sink = new byte[40];
+                return new ValueTask<int>(2);
+            },
+            "equal calls");
+
+        Assert.Equal(baselineCalls, candidateCalls);
+    }
+
+    [Fact]
+    public async Task AssertNoMoreThanAsync_BaselineWithAFewLuckyWindows_DoesNotFailAnEqualCandidate()
+    {
+        // A call that completes on another thread now and then finds its work already done and
+        // allocates less, for a window or two (#76). The least window of the baseline then lay
+        // several bytes per call under the candidate's. The median is not moved by a few windows.
+        const int warmup = 100;
+        var baseline = new LuckyWindows(warmup, Iterations, lucky: [3, 7, 11]);
+        var candidate = new LuckyWindows(warmup, Iterations, lucky: []);
+
+        await AllocationGate.AssertNoMoreThanAsync(
+            Iterations, AllocationGate.DefaultAsyncToleranceBytesPerCall, warmup, baseline.Call, candidate.Call, "lucky baseline");
+
+        Assert.True(baseline.LuckyCalls > 0, "the lucky windows never ran");
+    }
+
+    [Fact]
+    public async Task AssertNoMoreThanAsync_CandidateAllocatesOneSmallObjectMore_Fails()
+    {
+        // 24 B per call, the smallest object, is three times the default tolerance.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AllocationGate.AssertNoMoreThanAsync(
+                Iterations,
+                static () =>
+                {
+                    Escape.Sink = new byte[40];
+                    return default;
+                },
+                static () =>
+                {
+                    Escape.Sink = new byte[40];
+                    Escape.Sink = new object();
+                    return default;
+                },
+                "one object more"));
+
+        Assert.Contains("candidate allocated", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AssertNoMoreThanAsync_CandidateAllocatesMore_StillFails()
+    {
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AllocationGate.AssertNoMoreThanAsync(
+                Iterations,
+                static () =>
+                {
+                    Escape.Sink = new byte[40];
+                    return default;
+                },
+                static () =>
+                {
+                    Escape.Sink = new byte[40];
+                    Escape.Sink = new byte[40];
+                    return default;
+                },
+                "twice the allocations"));
+
+        Assert.Contains("candidate allocated", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AssertBudget_TierZeroBoxing_IsNotCounted()
     {
         // Tier-0 code boxes the value for the interface check and call, 24 B per call; the
@@ -236,6 +351,27 @@ public sealed class StableMeasurementTests
     /// A call that allocates a 32 B array in every other window and a 64 B array in the windows
     /// between, so no two consecutive windows ever agree.
     /// </summary>
+    /// <summary>A call that allocates 40 B, except in the windows given, where it allocates nothing.</summary>
+    private sealed class LuckyWindows(int warmup, int iterations, int[] lucky)
+    {
+        private long _calls;
+
+        public long LuckyCalls { get; private set; }
+
+        public ValueTask Call()
+        {
+            var window = (_calls++ - warmup) / iterations;
+            if (_calls > warmup && Array.IndexOf(lucky, (int)window) >= 0)
+            {
+                LuckyCalls++;
+                return default;
+            }
+
+            Escape.Sink = new byte[40];
+            return default;
+        }
+    }
+
     private sealed class AlternatesEveryWindow(int warmup, int iterations)
     {
         private long _calls;
