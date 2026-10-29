@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.8.0...v1.8.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* fail GeneratorSnapshot.Verify when the generator emits nothing ([#97](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/97)) ([485aabc](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/485aabcb45a6944f5bff57934eea03c542ff7556)), closes [#95](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/95)
+
 ## [1.8.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.7.3...v1.8.0) (2026-10-17)
 
 
