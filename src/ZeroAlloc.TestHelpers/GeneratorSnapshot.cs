@@ -32,6 +32,8 @@ internal static class GeneratorSnapshot
     /// <c>{TestClass}.{TestMethod}#{hintName}.verified.cs</c>.
     /// The caller arguments are compiler-supplied; the repos' MA0048 rule guarantees the file
     /// name matches the test class name, which is what Verify used for the prefix.
+    /// Throws when the driver produced no sources at all, since there is then nothing to verify;
+    /// a test that expects no output should assert that directly.
     /// </summary>
     [RequiresUnreferencedCode(TextSnapshot.StackWalkReason)]
     public static void Verify(
@@ -75,6 +77,11 @@ internal static class GeneratorSnapshot
             TextSnapshot.Compare(Path.Combine(dir, fileName), $"//HintName: {hint}\n{body}", "cs", update, failures);
         }
 
+        // An empty run has nothing to compare and no orphan to report when no snapshot exists yet,
+        // so it would pass while testing nothing. Fail before update mode can delete anything.
+        if (produced.Count == 0)
+            throw new InvalidOperationException(NoSourcesMessage(prefix, runResult));
+
         // A snapshot for output the generator no longer emits would otherwise pass silently —
         // a test that quietly stopped testing.
         var orphans = Directory
@@ -97,6 +104,24 @@ internal static class GeneratorSnapshot
         }
 
         TextSnapshot.Throw(prefix, failures);
+    }
+
+    private static string NoSourcesMessage(string prefix, GeneratorDriverRunResult runResult)
+    {
+        var message =
+            $"Snapshot mismatch for {prefix}: the generator produced no sources; " +
+            "a snapshot test must verify at least one file. " +
+            "A test that expects no output should assert that directly instead of calling Verify.";
+
+        var errors = runResult.Diagnostics
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .Select(d => d.ToString())
+            .ToList();
+
+        return errors.Count == 0
+            ? message
+            : $"{message}{Environment.NewLine}The run reported error diagnostics:" +
+              $"{Environment.NewLine}{string.Join(Environment.NewLine, errors)}";
     }
 
     /// <summary>
