@@ -167,6 +167,12 @@ internal static class AllocationGate
     // median is not moved by a minority of windows, in either direction.
     private const int ComparisonWindows = 15;
 
+    /// <summary>
+    /// How many windows of each call <c>MeasureBytesPerCallInterleavedAsync</c> counts call by
+    /// call, once the windows before them are stable.
+    /// </summary>
+    public const int ModeWindows = 5;
+
     // How long tiering must have shown no sign of activity before a measurement counts as settled.
     // Three tiering delays: a batch of promotions, and the batch after it, are at least one delay
     // apart, and the events that report them arrive late. See Stability.JitHasSettled.
@@ -255,19 +261,29 @@ internal static class AllocationGate
 
     /// <summary>
     /// The bytes one call of each of <paramref name="first"/> and <paramref name="second"/>
-    /// allocates on any thread, measured side by side, for figures that are compared with each
-    /// other. Every call is awaited. Counts process-wide, as
+    /// allocates on any thread on the path most of its calls take, measured side by side, for
+    /// figures that are compared with each other. Every call is awaited. Counts process-wide, as
     /// <see cref="MeasureBytesPerCallAsync(int, Func{ValueTask})"/> does.
     /// </summary>
     /// <remarks>
-    /// Measures as <see cref="AssertNoMoreThanAsync(int, Func{ValueTask}, Func{ValueTask}, string)"/>
-    /// does: after the warmup of each, the two run in alternating windows of
-    /// <paramref name="iterations"/> calls until both are stable and each has at least fifteen
-    /// windows, and each returns the median of its windows, averaged per call and rounded up.
-    /// <see cref="MeasureBytesPerCallAsync(int, Func{ValueTask})"/> returns the least window of
-    /// one call measured on its own, and a few windows of a call that completes on another thread
-    /// can read lower than its steady state, so the difference of two such figures is not exact;
-    /// the median of interleaved windows is. Run it where no other test runs concurrently.
+    /// <para>
+    /// After the warmup of each, the two run in alternating windows of
+    /// <paramref name="iterations"/> calls until both are stable and tiered compilation has
+    /// settled, as for <see cref="AssertNoMoreThanAsync(int, Func{ValueTask}, Func{ValueTask}, string)"/>.
+    /// Then each runs <see cref="ModeWindows"/> more alternating windows in which every call is
+    /// counted on its own, and each returns the figure most of its calls read. It throws if no
+    /// figure holds more than half of a side's calls.
+    /// </para>
+    /// <para>
+    /// A call that awaits real I/O allocates a different, exact amount on each path it can take:
+    /// every await that yields boxes a state machine, and one that finds its result ready does
+    /// not. Which path a call takes depends on timing, so on a loaded machine averages, the least
+    /// window and the median window all move. The figure most calls read does not, and it stays
+    /// exact, so one more object per call still shows. It does not see an allocation that only
+    /// some calls make, such as a buffer rented every hundredth call: gate such a call with
+    /// <see cref="AssertBudgetAsync(int, int, Func{ValueTask}, string)"/>. Run it where no other
+    /// test runs concurrently.
+    /// </para>
     /// </remarks>
     public static Task<(long First, long Second)> MeasureBytesPerCallInterleavedAsync<T1, T2>(
         int iterations, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second) =>
@@ -285,7 +301,7 @@ internal static class AllocationGate
         ArgumentOutOfRangeException.ThrowIfLessThan(iterations, 1);
         ArgumentOutOfRangeException.ThrowIfNegative(warmup);
 
-        return MedianPerCallAsync(iterations, warmup, first, second);
+        return Task.Run(() => MeasureModesAsync(iterations, warmup, first, second));
     }
 
     /// <summary>
@@ -309,27 +325,8 @@ internal static class AllocationGate
         ArgumentOutOfRangeException.ThrowIfLessThan(iterations, 1);
         ArgumentOutOfRangeException.ThrowIfNegative(warmup);
 
-        return MedianPerCallAsync(iterations, warmup, first, second, third);
+        return Task.Run(() => MeasureModesAsync(iterations, warmup, first, second, third));
     }
-
-    private static async Task<(long First, long Second)> MedianPerCallAsync<T1, T2>(
-        int iterations, int warmup, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second)
-    {
-        var (a, b) = await Task.Run(
-            () => MeasureInterleavedAsync(iterations, warmup, DefaultAsyncToleranceBytesPerCall, first, second)).ConfigureAwait(false);
-        return (MedianPerCall(a, iterations, "first"), MedianPerCall(b, iterations, "second"));
-    }
-
-    private static async Task<(long First, long Second, long Third)> MedianPerCallAsync<T1, T2, T3>(
-        int iterations, int warmup, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second, Func<ValueTask<T3>> third)
-    {
-        var (a, b, c) = await Task.Run(
-            () => MeasureInterleavedAsync(iterations, warmup, DefaultAsyncToleranceBytesPerCall, first, second, third)).ConfigureAwait(false);
-        return (MedianPerCall(a, iterations, "first"), MedianPerCall(b, iterations, "second"), MedianPerCall(c, iterations, "third"));
-    }
-
-    private static long MedianPerCall(Measurement measured, int iterations, string side) =>
-        PerCall(ThrowIfTieringUnsettled(measured, $"{nameof(MeasureBytesPerCallInterleavedAsync)}, {side} call").Compared, iterations);
 
     /// <summary>
     /// Throws if one call of <paramref name="action"/> allocates more than
@@ -618,7 +615,103 @@ internal static class AllocationGate
         }
     }
 
-    // Three calls in turn, one window each, as above.
+    // MeasureBytesPerCallInterleavedAsync (#434). The windows run as in MeasureInterleavedAsync
+    // until all sides are stable, so the code counted is the optimised code. Then each side runs
+    // ModeWindows more windows in which every call is counted on its own, into a histogram of
+    // bytes per call.
+    private static async Task<(long First, long Second)> MeasureModesAsync<T1, T2>(
+        int iterations, int warmup, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second)
+    {
+        var (a, b) = await MeasureInterleavedAsync(iterations, warmup, DefaultAsyncToleranceBytesPerCall, first, second).ConfigureAwait(false);
+        _ = ThrowIfTieringUnsettled(a, ModeSide(1));
+        _ = ThrowIfTieringUnsettled(b, ModeSide(2));
+        return await CountModesAsync(iterations, first, second).ConfigureAwait(false);
+    }
+
+    private static async Task<(long First, long Second, long Third)> MeasureModesAsync<T1, T2, T3>(
+        int iterations, int warmup, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second, Func<ValueTask<T3>> third)
+    {
+        var (a, b, c) = await MeasureInterleavedAsync(iterations, warmup, DefaultAsyncToleranceBytesPerCall, first, second, third).ConfigureAwait(false);
+        _ = ThrowIfTieringUnsettled(a, ModeSide(1));
+        _ = ThrowIfTieringUnsettled(b, ModeSide(2));
+        _ = ThrowIfTieringUnsettled(c, ModeSide(3));
+        return await CountModesAsync(iterations, first, second, third).ConfigureAwait(false);
+    }
+
+    // The per-call windows of MeasureModesAsync. One uncounted call of each comes first, so this
+    // method's own state machine is boxed at its first yield, outside a counted call. A histogram
+    // grows between two calls, never inside one.
+    private static async Task<(long First, long Second)> CountModesAsync<T1, T2>(
+        int iterations, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second)
+    {
+        _ = await first().ConfigureAwait(false);
+        _ = await second().ConfigureAwait(false);
+
+        var firstCalls = new CallHistogram();
+        var secondCalls = new CallHistogram();
+        for (int window = 0; window < ModeWindows; window++)
+        {
+            WaitForQuietProcess();
+            for (int i = 0; i < iterations; i++)
+            {
+                var before = GC.GetTotalAllocatedBytes(precise: true);
+                _ = await first().ConfigureAwait(false);
+                firstCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before);
+            }
+
+            WaitForQuietProcess();
+            for (int i = 0; i < iterations; i++)
+            {
+                var before = GC.GetTotalAllocatedBytes(precise: true);
+                _ = await second().ConfigureAwait(false);
+                secondCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before);
+            }
+        }
+
+        return (firstCalls.Mode(ModeSide(1)), secondCalls.Mode(ModeSide(2)));
+    }
+
+    private static async Task<(long First, long Second, long Third)> CountModesAsync<T1, T2, T3>(
+        int iterations, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second, Func<ValueTask<T3>> third)
+    {
+        _ = await first().ConfigureAwait(false);
+        _ = await second().ConfigureAwait(false);
+        _ = await third().ConfigureAwait(false);
+
+        var firstCalls = new CallHistogram();
+        var secondCalls = new CallHistogram();
+        var thirdCalls = new CallHistogram();
+        for (int window = 0; window < ModeWindows; window++)
+        {
+            WaitForQuietProcess();
+            for (int i = 0; i < iterations; i++)
+            {
+                var before = GC.GetTotalAllocatedBytes(precise: true);
+                _ = await first().ConfigureAwait(false);
+                firstCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before);
+            }
+
+            WaitForQuietProcess();
+            for (int i = 0; i < iterations; i++)
+            {
+                var before = GC.GetTotalAllocatedBytes(precise: true);
+                _ = await second().ConfigureAwait(false);
+                secondCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before);
+            }
+
+            WaitForQuietProcess();
+            for (int i = 0; i < iterations; i++)
+            {
+                var before = GC.GetTotalAllocatedBytes(precise: true);
+                _ = await third().ConfigureAwait(false);
+                thirdCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before);
+            }
+        }
+
+        return (firstCalls.Mode(ModeSide(1)), secondCalls.Mode(ModeSide(2)), thirdCalls.Mode(ModeSide(3)));
+    }
+
+    // Three calls in turn, one window each, as MeasureInterleavedAsync runs two.
     private static async Task<(Measurement First, Measurement Second, Measurement Third)> MeasureInterleavedAsync<T1, T2, T3>(
         int iterations, int warmup, int toleranceBytesPerCall,
         Func<ValueTask<T1>> first, Func<ValueTask<T2>> second, Func<ValueTask<T3>> third)
@@ -655,6 +748,49 @@ internal static class AllocationGate
 
             if (Stability.AllDone(firstStability, secondStability, thirdStability))
                 return (firstStability.Result, secondStability.Result, thirdStability.Result);
+        }
+    }
+
+    private static string ModeSide(int side) =>
+        $"{nameof(MeasureBytesPerCallInterleavedAsync)}, {(side == 1 ? "first" : side == 2 ? "second" : "third")} call";
+
+    // How many calls read each number of bytes. The dictionary grows between two calls, never
+    // inside one.
+    private sealed class CallHistogram
+    {
+        private readonly Dictionary<long, int> _calls = new Dictionary<long, int>(capacity: 64);
+        private int _total;
+
+        public void Add(long bytes)
+        {
+            _calls[bytes] = _calls.GetValueOrDefault(bytes) + 1;
+            _total++;
+        }
+
+        // The bytes most calls read, if more than half did. Otherwise no path is the call's
+        // usual one, and any figure would depend on timing, so it throws with the histogram.
+        public long Mode(string what)
+        {
+            var mode = 0L;
+            var count = 0;
+            foreach (var (bytes, calls) in _calls)
+            {
+                if (calls > count)
+                    (mode, count) = (bytes, calls);
+            }
+
+            if (count * 2 > _total)
+                return mode;
+
+            var paths = new List<KeyValuePair<long, int>>(_calls);
+            paths.Sort(static (a, b) => b.Value.CompareTo(a.Value));
+            var shown = string.Join(", ", paths.GetRange(0, Math.Min(paths.Count, 6)).ConvertAll(p =>
+                string.Create(CultureInfo.InvariantCulture, $"{p.Key} B in {p.Value}")));
+            throw new InvalidOperationException(
+                $"AllocationGate: {what} took no one path in most of its {_total} calls: {shown}. " +
+                "A call allocates a different amount on each path, for example when an await does or does not " +
+                "yield, and here which path it takes depends on timing. Run it where the machine is less busy, " +
+                "or gate an allocation that only some calls make with AssertBudgetAsync.");
         }
     }
 
