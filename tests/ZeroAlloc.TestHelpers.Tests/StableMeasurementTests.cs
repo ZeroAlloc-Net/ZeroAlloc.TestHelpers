@@ -255,6 +255,105 @@ public sealed class StableMeasurementTests
     }
 
     [Fact]
+    public async Task MeasureBytesPerCallInterleavedAsync_ThreeSides_ReturnsEachExactly()
+    {
+        // Arrays of 40 B and 64 B of payload, plus the 24 B header and length of an array.
+        long first = 0, second = 0, third = 0;
+
+        var (a, b, c) = await AllocationGate.MeasureBytesPerCallInterleavedAsync(
+            Iterations,
+            () =>
+            {
+                first++;
+                Escape.Sink = new byte[40];
+                return new ValueTask<int>(1);
+            },
+            () =>
+            {
+                second++;
+                return new ValueTask<string>("none");
+            },
+            () =>
+            {
+                third++;
+                Escape.Sink = new byte[64];
+                return new ValueTask<long>(3);
+            });
+
+        Assert.Equal((64, 0, 88), (a, b, c));
+        Assert.Equal(first, second);
+        Assert.Equal(first, third);
+    }
+
+    [Fact]
+    public async Task MeasureBytesPerCallInterleavedAsync_TwoSides_ReturnsEachExactly()
+    {
+        long first = 0, second = 0;
+
+        var (a, b) = await AllocationGate.MeasureBytesPerCallInterleavedAsync(
+            Iterations,
+            () =>
+            {
+                first++;
+                Escape.Sink = new byte[40];
+                return new ValueTask<int>(1);
+            },
+            () =>
+            {
+                second++;
+                Escape.Sink = new byte[64];
+                return new ValueTask<string>("two");
+            });
+
+        Assert.Equal((64, 88), (a, b));
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
+    public void MeasureBytesPerCallInterleavedAsync_InvalidArguments_ThrowBeforeMeasuring()
+    {
+        // Thrown by the call itself, as the other gates do, not by the task it returns.
+        Func<ValueTask<int>> call = static () => new ValueTask<int>(1);
+
+        _ = Assert.Throws<ArgumentNullException>(() => { _ = AllocationGate.MeasureBytesPerCallInterleavedAsync(Iterations, call, (Func<ValueTask<int>>)null!); });
+        _ = Assert.Throws<ArgumentNullException>(() => { _ = AllocationGate.MeasureBytesPerCallInterleavedAsync(Iterations, call, call, (Func<ValueTask<int>>)null!); });
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => { _ = AllocationGate.MeasureBytesPerCallInterleavedAsync(0, call, call); });
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => { _ = AllocationGate.MeasureBytesPerCallInterleavedAsync(Iterations, -1, call, call, call); });
+    }
+
+    [Fact]
+    public async Task MeasureBytesPerCallInterleavedAsync_SideWithAFewLuckyWindows_ReadsItsSteadyState()
+    {
+        // ZeroAlloc.ORM#434: a call that completes on another thread now and then allocates less
+        // for a window, and the least window of one side then lay below its steady state. The
+        // median of each side is not moved by a few windows, in either direction.
+        const int warmup = 100;
+        var lucky = new LuckyWindows(warmup, Iterations, lucky: [3, 7, 11]);
+        var steady = new LuckyWindows(warmup, Iterations, lucky: []);
+
+        var (luckyBytes, steadyBytes) = await AllocationGate.MeasureBytesPerCallInterleavedAsync(
+            Iterations, warmup, lucky.CallValue, steady.CallValue);
+
+        Assert.True(lucky.LuckyCalls > 0, "the lucky windows never ran");
+        Assert.Equal((64, 64), (luckyBytes, steadyBytes));
+    }
+
+    [Fact]
+    public async Task MeasureBytesPerCallInterleavedAsync_ThreeSides_SideWithAFewLuckyWindows_ReadsItsSteadyState()
+    {
+        const int warmup = 100;
+        var lucky = new LuckyWindows(warmup, Iterations, lucky: [3, 7, 11]);
+        var first = new LuckyWindows(warmup, Iterations, lucky: []);
+        var third = new LuckyWindows(warmup, Iterations, lucky: []);
+
+        var bytes = await AllocationGate.MeasureBytesPerCallInterleavedAsync(
+            Iterations, warmup, first.CallValue, lucky.CallValue, third.CallValue);
+
+        Assert.True(lucky.LuckyCalls > 0, "the lucky windows never ran");
+        Assert.Equal((64, 64, 64), bytes);
+    }
+
+    [Fact]
     public async Task AssertNoMoreThanAsync_CandidateAllocatesOneSmallObjectMore_Fails()
     {
         // 24 B per call, the smallest object, is three times the default tolerance.
@@ -369,6 +468,12 @@ public sealed class StableMeasurementTests
 
             Escape.Sink = new byte[40];
             return default;
+        }
+
+        public async ValueTask<int> CallValue()
+        {
+            await Call().ConfigureAwait(false);
+            return 1;
         }
     }
 

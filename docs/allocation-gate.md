@@ -50,8 +50,10 @@ For a call that really yields, such as one that awaits I/O, use the `Async` meth
 | `Task AssertBudgetAsync(int budgetBytes, int toleranceBytesPerCall, int iterations, int warmup, Func<ValueTask> action, string label)` | a call allocates more than `budgetBytes + toleranceBytesPerCall` |
 | `Task AssertNoMoreThanAsync(int iterations, Func<ValueTask> baseline, Func<ValueTask> candidate, string label)` | `candidate` allocates more per call than `baseline` + 8 B |
 | `Task AssertNoMoreThanAsync(int iterations, int toleranceBytesPerCall, int warmup, Func<ValueTask> baseline, Func<ValueTask> candidate, string label)` | `candidate` allocates more per call than `baseline + toleranceBytesPerCall` |
+| `Task<(long First, long Second)> MeasureBytesPerCallInterleavedAsync<T1, T2>(int iterations, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second)` | never; returns bytes per call of each |
+| `Task<(long First, long Second, long Third)> MeasureBytesPerCallInterleavedAsync<T1, T2, T3>(int iterations, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second, Func<ValueTask<T3>> third)` | never; returns bytes per call of each |
 
-Each method also has an overload that takes `Func<ValueTask<T>>`. For an API that returns `Task`, pass `() => new ValueTask(client.SendAsync())`; wrapping a `Task` in a `ValueTask` allocates nothing.
+Each method except `MeasureBytesPerCallInterleavedAsync` also has an overload that takes `Func<ValueTask<T>>`; `MeasureBytesPerCallInterleavedAsync` takes only those, one type per call, and has an overload with a `warmup` after `iterations`. For an API that returns `Task`, pass `() => new ValueTask(client.SendAsync())`; wrapping a `Task` in a `ValueTask` allocates nothing.
 
 ```csharp
 using ZeroAlloc.TestHelpers;
@@ -78,6 +80,8 @@ How a measurement runs:
 5. It keeps the least window, averaged per call and rounded up. The counter only grows, so another thread's allocations can only add to a window. The quietest window is the closest to what the calls alone allocate.
 
 `AssertNoMoreThanAsync` compares differently (#76). It measures the two sides in alternating windows, baseline then candidate, and keeps going until both are stable and have at least 15 windows each. It then compares the median window of each, not the least. The window of a call that completes on another thread varies with how the scheduler ran it: now and then a window is a few percent lower than all the others, because some calls found their work already done. That is not another thread's noise, which could only add. It is the call itself, and the side that happened to have such a window lay several bytes per call below the other. Two equal calls then differed by more than the default tolerance about one run in thirty. Measured that way, 13 of 400 runs failed; with alternating windows and the median, none of 700 did. The median is not moved by a minority of windows in either direction, and a candidate that allocates a whole object more per call still fails.
+
+`MeasureBytesPerCallInterleavedAsync` measures two or three calls the same way and returns the median of each, per call and rounded up. Use it where a test subtracts one figure from another, for example to gate what a layer adds over a hand-written baseline: the difference of two `MeasureBytesPerCallAsync` figures can be off by one side's low window, and by whatever landed in two windows that happened to agree (ZeroAlloc.ORM#434).
 
 How far to trust it:
 
