@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.2](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.8.1...v1.8.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* measure AllocationGate in steady state and compare equal calls fairly ([#99](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/99)) ([fa55208](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/fa55208597f54884050ea80bd6cc2557f779c991)), closes [#94](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/94) [#76](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/76)
+
 ## [1.8.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.8.0...v1.8.1) (2026-10-29)
 
 
