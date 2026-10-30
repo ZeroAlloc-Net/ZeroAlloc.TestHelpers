@@ -210,7 +210,8 @@ internal static class AllocationGate
     /// passes. Returns the least window, averaged per call and rounded up. Before each window it
     /// waits, for up to a second, until no thread has allocated for 10 ms. Runs on a thread-pool
     /// thread, so the caller's SynchronizationContext is not used. Run it where no other test runs
-    /// concurrently.
+    /// concurrently. To compare the figures of two or three calls with each other, measure them
+    /// with MeasureBytesPerCallInterleavedAsync instead.
     /// </remarks>
     public static Task<long> MeasureBytesPerCallAsync(int iterations, Func<ValueTask> action) =>
         MeasureBytesPerCallAsync(iterations, DefaultAsyncWarmup, action);
@@ -251,6 +252,84 @@ internal static class AllocationGate
             () => MeasureLeastWindowAsync(iterations, warmup, NoBudget, DefaultAsyncToleranceBytesPerCall, action),
             iterations);
     }
+
+    /// <summary>
+    /// The bytes one call of each of <paramref name="first"/> and <paramref name="second"/>
+    /// allocates on any thread, measured side by side, for figures that are compared with each
+    /// other. Every call is awaited. Counts process-wide, as
+    /// <see cref="MeasureBytesPerCallAsync(int, Func{ValueTask})"/> does.
+    /// </summary>
+    /// <remarks>
+    /// Measures as <see cref="AssertNoMoreThanAsync(int, Func{ValueTask}, Func{ValueTask}, string)"/>
+    /// does: after the warmup of each, the two run in alternating windows of
+    /// <paramref name="iterations"/> calls until both are stable and each has at least fifteen
+    /// windows, and each returns the median of its windows, averaged per call and rounded up.
+    /// <see cref="MeasureBytesPerCallAsync(int, Func{ValueTask})"/> returns the least window of
+    /// one call measured on its own, and a few windows of a call that completes on another thread
+    /// can read lower than its steady state, so the difference of two such figures is not exact;
+    /// the median of interleaved windows is. Run it where no other test runs concurrently.
+    /// </remarks>
+    public static Task<(long First, long Second)> MeasureBytesPerCallInterleavedAsync<T1, T2>(
+        int iterations, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second) =>
+        MeasureBytesPerCallInterleavedAsync(iterations, DefaultAsyncWarmup, first, second);
+
+    /// <summary>
+    /// <see cref="MeasureBytesPerCallInterleavedAsync{T1, T2}(int, Func{ValueTask{T1}}, Func{ValueTask{T2}})"/>
+    /// with <paramref name="warmup"/> warmup calls of each.
+    /// </summary>
+    public static Task<(long First, long Second)> MeasureBytesPerCallInterleavedAsync<T1, T2>(
+        int iterations, int warmup, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+        ArgumentOutOfRangeException.ThrowIfLessThan(iterations, 1);
+        ArgumentOutOfRangeException.ThrowIfNegative(warmup);
+
+        return MedianPerCallAsync(iterations, warmup, first, second);
+    }
+
+    /// <summary>
+    /// <see cref="MeasureBytesPerCallInterleavedAsync{T1, T2}(int, Func{ValueTask{T1}}, Func{ValueTask{T2}})"/>
+    /// for three calls, which run in turn, one window each.
+    /// </summary>
+    public static Task<(long First, long Second, long Third)> MeasureBytesPerCallInterleavedAsync<T1, T2, T3>(
+        int iterations, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second, Func<ValueTask<T3>> third) =>
+        MeasureBytesPerCallInterleavedAsync(iterations, DefaultAsyncWarmup, first, second, third);
+
+    /// <summary>
+    /// <see cref="MeasureBytesPerCallInterleavedAsync{T1, T2, T3}(int, Func{ValueTask{T1}}, Func{ValueTask{T2}}, Func{ValueTask{T3}})"/>
+    /// with <paramref name="warmup"/> warmup calls of each.
+    /// </summary>
+    public static Task<(long First, long Second, long Third)> MeasureBytesPerCallInterleavedAsync<T1, T2, T3>(
+        int iterations, int warmup, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second, Func<ValueTask<T3>> third)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+        ArgumentNullException.ThrowIfNull(third);
+        ArgumentOutOfRangeException.ThrowIfLessThan(iterations, 1);
+        ArgumentOutOfRangeException.ThrowIfNegative(warmup);
+
+        return MedianPerCallAsync(iterations, warmup, first, second, third);
+    }
+
+    private static async Task<(long First, long Second)> MedianPerCallAsync<T1, T2>(
+        int iterations, int warmup, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second)
+    {
+        var (a, b) = await Task.Run(
+            () => MeasureInterleavedAsync(iterations, warmup, DefaultAsyncToleranceBytesPerCall, first, second)).ConfigureAwait(false);
+        return (MedianPerCall(a, iterations, "first"), MedianPerCall(b, iterations, "second"));
+    }
+
+    private static async Task<(long First, long Second, long Third)> MedianPerCallAsync<T1, T2, T3>(
+        int iterations, int warmup, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second, Func<ValueTask<T3>> third)
+    {
+        var (a, b, c) = await Task.Run(
+            () => MeasureInterleavedAsync(iterations, warmup, DefaultAsyncToleranceBytesPerCall, first, second, third)).ConfigureAwait(false);
+        return (MedianPerCall(a, iterations, "first"), MedianPerCall(b, iterations, "second"), MedianPerCall(c, iterations, "third"));
+    }
+
+    private static long MedianPerCall(Measurement measured, int iterations, string side) =>
+        PerCall(ThrowIfTieringUnsettled(measured, $"{nameof(MeasureBytesPerCallInterleavedAsync)}, {side} call").Compared, iterations);
 
     /// <summary>
     /// Throws if one call of <paramref name="action"/> allocates more than
@@ -505,13 +584,13 @@ internal static class AllocationGate
             for (int i = 0; i < iterations; i++) await candidate().ConfigureAwait(false);
             candidateStability.Record(GC.GetTotalAllocatedBytes(precise: true) - before);
 
-            if (Stability.BothDone(baselineStability, candidateStability))
+            if (Stability.AllDone(baselineStability, candidateStability))
                 return (baselineStability.Result, candidateStability.Result);
         }
     }
 
-    private static async Task<(Measurement Baseline, Measurement Candidate)> MeasureInterleavedAsync<T>(
-        int iterations, int warmup, int toleranceBytesPerCall, Func<ValueTask<T>> baseline, Func<ValueTask<T>> candidate)
+    private static async Task<(Measurement Baseline, Measurement Candidate)> MeasureInterleavedAsync<TBaseline, TCandidate>(
+        int iterations, int warmup, int toleranceBytesPerCall, Func<ValueTask<TBaseline>> baseline, Func<ValueTask<TCandidate>> candidate)
     {
         SettleHeap();
         var begun = Stopwatch.GetTimestamp();
@@ -534,8 +613,48 @@ internal static class AllocationGate
             for (int i = 0; i < iterations; i++) _ = await candidate().ConfigureAwait(false);
             candidateStability.Record(GC.GetTotalAllocatedBytes(precise: true) - before);
 
-            if (Stability.BothDone(baselineStability, candidateStability))
+            if (Stability.AllDone(baselineStability, candidateStability))
                 return (baselineStability.Result, candidateStability.Result);
+        }
+    }
+
+    // Three calls in turn, one window each, as above.
+    private static async Task<(Measurement First, Measurement Second, Measurement Third)> MeasureInterleavedAsync<T1, T2, T3>(
+        int iterations, int warmup, int toleranceBytesPerCall,
+        Func<ValueTask<T1>> first, Func<ValueTask<T2>> second, Func<ValueTask<T3>> third)
+    {
+        SettleHeap();
+        var begun = Stopwatch.GetTimestamp();
+
+        for (int i = 0; i < warmup; i++) _ = await first().ConfigureAwait(false);
+        var secondBegun = Stopwatch.GetTimestamp();
+        for (int i = 0; i < warmup; i++) _ = await second().ConfigureAwait(false);
+        var thirdBegun = Stopwatch.GetTimestamp();
+        for (int i = 0; i < warmup; i++) _ = await third().ConfigureAwait(false);
+
+        var agreementBytes = (long)toleranceBytesPerCall * iterations;
+        var firstStability = new Stability(NoBudget, agreementBytes, begun, keepWindows: true);
+        var secondStability = new Stability(NoBudget, agreementBytes, secondBegun, keepWindows: true);
+        var thirdStability = new Stability(NoBudget, agreementBytes, thirdBegun, keepWindows: true);
+        while (true)
+        {
+            WaitForQuietProcess();
+            var before = GC.GetTotalAllocatedBytes(precise: true);
+            for (int i = 0; i < iterations; i++) _ = await first().ConfigureAwait(false);
+            firstStability.Record(GC.GetTotalAllocatedBytes(precise: true) - before);
+
+            WaitForQuietProcess();
+            before = GC.GetTotalAllocatedBytes(precise: true);
+            for (int i = 0; i < iterations; i++) _ = await second().ConfigureAwait(false);
+            secondStability.Record(GC.GetTotalAllocatedBytes(precise: true) - before);
+
+            WaitForQuietProcess();
+            before = GC.GetTotalAllocatedBytes(precise: true);
+            for (int i = 0; i < iterations; i++) _ = await third().ConfigureAwait(false);
+            thirdStability.Record(GC.GetTotalAllocatedBytes(precise: true) - before);
+
+            if (Stability.AllDone(firstStability, secondStability, thirdStability))
+                return (firstStability.Result, secondStability.Result, thirdStability.Result);
         }
     }
 
@@ -737,21 +856,25 @@ internal static class AllocationGate
             return false;
         }
 
-        // Both sides of a comparison stop together, on the same number of windows, when each is
-        // stable and they have ComparisonWindows each, or when either has run out of time. The
-        // result then has the median of the windows.
-        public static bool BothDone(Stability first, Stability second)
+        // All sides of a comparison stop together, on the same number of windows, when each is
+        // stable and they have ComparisonWindows each, or when each has stopped and one has run
+        // out of time. The result then has the median of the windows.
+        public static bool AllDone(params ReadOnlySpan<Stability> sides)
         {
-            var firstDone = first.Evaluate();
-            var secondDone = second.Evaluate();
-            if (!firstDone || !secondDone)
+            // Every side is evaluated, so each one's Result is current.
+            var allDone = true;
+            var allStable = true;
+            foreach (var side in sides)
+            {
+                allDone &= side.Evaluate();
+                allStable &= side.Result.Stable;
+            }
+
+            if (!allDone || (allStable && sides[0]._windows < ComparisonWindows))
                 return false;
 
-            if (first.Result.Stable && second.Result.Stable && first._windows < ComparisonWindows)
-                return false;
-
-            first.Result = first.Result with { Median = first.Median() };
-            second.Result = second.Result with { Median = second.Median() };
+            foreach (var side in sides)
+                side.Result = side.Result with { Median = side.Median() };
             return true;
         }
 
