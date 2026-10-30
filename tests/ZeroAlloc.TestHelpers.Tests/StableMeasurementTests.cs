@@ -322,35 +322,73 @@ public sealed class StableMeasurementTests
     }
 
     [Fact]
-    public async Task MeasureBytesPerCallInterleavedAsync_SideWithAFewLuckyWindows_ReadsItsSteadyState()
+    public async Task MeasureBytesPerCallInterleavedAsync_CallThatSometimesTakesAnotherPath_ReadsItsUsualPath()
     {
-        // ZeroAlloc.ORM#434: a call that completes on another thread now and then allocates less
-        // for a window, and the least window of one side then lay below its steady state. The
-        // median of each side is not moved by a few windows, in either direction.
-        const int warmup = 100;
-        var lucky = new LuckyWindows(warmup, Iterations, lucky: [3, 7, 11]);
-        var steady = new LuckyWindows(warmup, Iterations, lucky: []);
+        // ZeroAlloc.ORM#434: an Npgsql call on a loaded machine allocated 1392 B on its usual
+        // path, more when further awaits yielded, and 752 B when it completed synchronously. The
+        // windows mixed those paths, so their least and their median moved with the load.
+        var low = new Paths(firstPathBytes: 40, otherPathBytes: 0, otherPathEvery: 4);
+        var high = new Paths(firstPathBytes: 40, otherPathBytes: 200, otherPathEvery: 4);
+        var steady = new Paths(firstPathBytes: 40, otherPathBytes: 40, otherPathEvery: 4);
 
-        var (luckyBytes, steadyBytes) = await AllocationGate.MeasureBytesPerCallInterleavedAsync(
-            Iterations, warmup, lucky.CallValue, steady.CallValue);
+        var bytes = await AllocationGate.MeasureBytesPerCallInterleavedAsync(Iterations, low.Call, high.Call, steady.Call);
 
-        Assert.True(lucky.LuckyCalls > 0, "the lucky windows never ran");
-        Assert.Equal((64, 64), (luckyBytes, steadyBytes));
+        Assert.Equal((64, 64, 64), bytes);
     }
 
     [Fact]
-    public async Task MeasureBytesPerCallInterleavedAsync_ThreeSides_SideWithAFewLuckyWindows_ReadsItsSteadyState()
+    public async Task MeasureBytesPerCallInterleavedAsync_OneMoreObjectPerCall_Shows()
     {
-        const int warmup = 100;
-        var lucky = new LuckyWindows(warmup, Iterations, lucky: [3, 7, 11]);
-        var first = new LuckyWindows(warmup, Iterations, lucky: []);
-        var third = new LuckyWindows(warmup, Iterations, lucky: []);
+        var (without, with) = await AllocationGate.MeasureBytesPerCallInterleavedAsync(
+            Iterations,
+            static () =>
+            {
+                Escape.Sink = new byte[40];
+                return new ValueTask<int>(1);
+            },
+            static () =>
+            {
+                Escape.Sink = new byte[40];
+                Escape.Sink = new object();
+                return new ValueTask<int>(2);
+            });
 
-        var bytes = await AllocationGate.MeasureBytesPerCallInterleavedAsync(
-            Iterations, warmup, first.CallValue, lucky.CallValue, third.CallValue);
+        Assert.Equal(24, with - without);
+    }
 
-        Assert.True(lucky.LuckyCalls > 0, "the lucky windows never ran");
-        Assert.Equal((64, 64, 64), bytes);
+    [Fact]
+    public async Task MeasureBytesPerCallInterleavedAsync_NoPathHoldsMostCalls_Throws()
+    {
+        // Half the calls take each path, so neither is the call's usual one.
+        var even = new Paths(firstPathBytes: 32, otherPathBytes: 64, otherPathEvery: 2);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AllocationGate.MeasureBytesPerCallInterleavedAsync(Iterations, even.Call, static () => new ValueTask<int>(1)));
+
+        Assert.Contains("first call took no one path in most of its", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("56 B synchronously in ", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("88 B synchronously in ", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MeasureBytesPerCallInterleavedAsync_SidesUsuallyCompleteDifferently_Throws()
+    {
+        // ZeroAlloc.ORM#434: under heavy load one side's usual path was the synchronous one, the
+        // others' the asynchronous one, and the difference of the two read 960 B over the budget.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AllocationGate.MeasureBytesPerCallInterleavedAsync(
+                Iterations,
+                static () => new ValueTask<int>(1),
+                static async () =>
+                {
+                    await Task.Yield();
+                    return 2;
+                }));
+
+        Assert.Contains("cannot compare the calls", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("first call mostly 0 B synchronously", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("second call mostly ", ex.Message, StringComparison.Ordinal);
+        Assert.Contains($" B asynchronously, of {Iterations * AllocationGate.ModeWindows} calls", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -469,11 +507,20 @@ public sealed class StableMeasurementTests
             Escape.Sink = new byte[40];
             return default;
         }
+    }
 
-        public async ValueTask<int> CallValue()
+    // A call that allocates an array of otherPathBytes on every otherPathEvery-th call, and one
+    // of firstPathBytes on every other call; no array at all for a size of 0.
+    private sealed class Paths(int firstPathBytes, int otherPathBytes, int otherPathEvery)
+    {
+        private long _calls;
+
+        public ValueTask<int> Call()
         {
-            await Call().ConfigureAwait(false);
-            return 1;
+            var bytes = ++_calls % otherPathEvery == 0 ? otherPathBytes : firstPathBytes;
+            if (bytes > 0)
+                Escape.Sink = new byte[bytes];
+            return new ValueTask<int>(bytes);
         }
     }
 
