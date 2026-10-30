@@ -272,7 +272,8 @@ internal static class AllocationGate
     /// settled, as for <see cref="AssertNoMoreThanAsync(int, Func{ValueTask}, Func{ValueTask}, string)"/>.
     /// Then each runs <see cref="ModeWindows"/> more alternating windows in which every call is
     /// counted on its own, and each returns the figure most of its calls read. It throws if no
-    /// figure holds more than half of a side's calls.
+    /// figure holds more than half of a side's calls, and if one side's usual path completes
+    /// synchronously and another's does not, because their difference is then not for one path.
     /// </para>
     /// <para>
     /// A call that awaits real I/O allocates a different, exact amount on each path it can take:
@@ -640,7 +641,8 @@ internal static class AllocationGate
 
     // The per-call windows of MeasureModesAsync. One uncounted call of each comes first, so this
     // method's own state machine is boxed at its first yield, outside a counted call. A histogram
-    // grows between two calls, never inside one.
+    // grows between two calls, never inside one. Each call also records whether it completed
+    // synchronously, read before it is awaited.
     private static async Task<(long First, long Second)> CountModesAsync<T1, T2>(
         int iterations, Func<ValueTask<T1>> first, Func<ValueTask<T2>> second)
     {
@@ -655,20 +657,26 @@ internal static class AllocationGate
             for (int i = 0; i < iterations; i++)
             {
                 var before = GC.GetTotalAllocatedBytes(precise: true);
-                _ = await first().ConfigureAwait(false);
-                firstCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before);
+                var call = first();
+                var synchronous = call.IsCompleted;
+                _ = await call.ConfigureAwait(false);
+                firstCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before, synchronous);
             }
 
             WaitForQuietProcess();
             for (int i = 0; i < iterations; i++)
             {
                 var before = GC.GetTotalAllocatedBytes(precise: true);
-                _ = await second().ConfigureAwait(false);
-                secondCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before);
+                var call = second();
+                var synchronous = call.IsCompleted;
+                _ = await call.ConfigureAwait(false);
+                secondCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before, synchronous);
             }
         }
 
-        return (firstCalls.Mode(ModeSide(1)), secondCalls.Mode(ModeSide(2)));
+        var paths = new[] { firstCalls.Mode(ModeSide(1)), secondCalls.Mode(ModeSide(2)) };
+        ThrowIfPathsDiffer(paths, firstCalls, secondCalls);
+        return (paths[0].Bytes, paths[1].Bytes);
     }
 
     private static async Task<(long First, long Second, long Third)> CountModesAsync<T1, T2, T3>(
@@ -687,28 +695,36 @@ internal static class AllocationGate
             for (int i = 0; i < iterations; i++)
             {
                 var before = GC.GetTotalAllocatedBytes(precise: true);
-                _ = await first().ConfigureAwait(false);
-                firstCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before);
+                var call = first();
+                var synchronous = call.IsCompleted;
+                _ = await call.ConfigureAwait(false);
+                firstCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before, synchronous);
             }
 
             WaitForQuietProcess();
             for (int i = 0; i < iterations; i++)
             {
                 var before = GC.GetTotalAllocatedBytes(precise: true);
-                _ = await second().ConfigureAwait(false);
-                secondCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before);
+                var call = second();
+                var synchronous = call.IsCompleted;
+                _ = await call.ConfigureAwait(false);
+                secondCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before, synchronous);
             }
 
             WaitForQuietProcess();
             for (int i = 0; i < iterations; i++)
             {
                 var before = GC.GetTotalAllocatedBytes(precise: true);
-                _ = await third().ConfigureAwait(false);
-                thirdCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before);
+                var call = third();
+                var synchronous = call.IsCompleted;
+                _ = await call.ConfigureAwait(false);
+                thirdCalls.Add(GC.GetTotalAllocatedBytes(precise: true) - before, synchronous);
             }
         }
 
-        return (firstCalls.Mode(ModeSide(1)), secondCalls.Mode(ModeSide(2)), thirdCalls.Mode(ModeSide(3)));
+        var paths = new[] { firstCalls.Mode(ModeSide(1)), secondCalls.Mode(ModeSide(2)), thirdCalls.Mode(ModeSide(3)) };
+        ThrowIfPathsDiffer(paths, firstCalls, secondCalls, thirdCalls);
+        return (paths[0].Bytes, paths[1].Bytes, paths[2].Bytes);
     }
 
     // Three calls in turn, one window each, as MeasureInterleavedAsync runs two.
@@ -754,43 +770,74 @@ internal static class AllocationGate
     private static string ModeSide(int side) =>
         $"{nameof(MeasureBytesPerCallInterleavedAsync)}, {(side == 1 ? "first" : side == 2 ? "second" : "third")} call";
 
-    // How many calls read each number of bytes. The dictionary grows between two calls, never
-    // inside one.
+    // The path a call takes: the bytes it allocates, and whether it completed synchronously.
+    private readonly record struct CallPath(long Bytes, bool Synchronous)
+    {
+        public override string ToString() =>
+            string.Create(CultureInfo.InvariantCulture, $"{Bytes} B {(Synchronous ? "synchronously" : "asynchronously")}");
+    }
+
+    // Under heavy load a call can complete synchronously most of the time, and one side's usual
+    // path can then be the synchronous one while another's is still the asynchronous one. Their
+    // difference is not what either side costs on the same path, so it throws instead.
+    private static void ThrowIfPathsDiffer(CallPath[] paths, params ReadOnlySpan<CallHistogram> calls)
+    {
+        if (Array.TrueForAll(paths, p => p.Synchronous == paths[0].Synchronous))
+            return;
+
+        var sides = new string[paths.Length];
+        for (int i = 0; i < paths.Length; i++)
+            sides[i] = $"{ModeSide(i + 1)} mostly {paths[i]}, of {calls[i].Describe()}";
+        throw new InvalidOperationException(
+            $"AllocationGate: {nameof(MeasureBytesPerCallInterleavedAsync)} cannot compare the calls: their usual paths " +
+            $"differ in whether they complete synchronously, so their figures are not for the same path. {string.Join("; ", sides)}. " +
+            "A call completes synchronously when its I/O is already done when it is awaited, which a loaded machine makes " +
+            "more likely. Run it where the machine is less busy.");
+    }
+
+    // How many calls took each path. The dictionary grows between two calls, never inside one.
     private sealed class CallHistogram
     {
-        private readonly Dictionary<long, int> _calls = new Dictionary<long, int>(capacity: 64);
+        private readonly Dictionary<CallPath, int> _calls = new Dictionary<CallPath, int>(capacity: 64);
         private int _total;
 
-        public void Add(long bytes)
+        public void Add(long bytes, bool synchronous)
         {
-            _calls[bytes] = _calls.GetValueOrDefault(bytes) + 1;
+            var path = new CallPath(bytes, synchronous);
+            _calls[path] = _calls.GetValueOrDefault(path) + 1;
             _total++;
         }
 
-        // The bytes most calls read, if more than half did. Otherwise no path is the call's
-        // usual one, and any figure would depend on timing, so it throws with the histogram.
-        public long Mode(string what)
+        // The path most calls took, if more than half did. Otherwise no path is the call's usual
+        // one, and any figure would depend on timing, so it throws with the histogram.
+        public CallPath Mode(string what)
         {
-            var mode = 0L;
+            var mode = default(CallPath);
             var count = 0;
-            foreach (var (bytes, calls) in _calls)
+            foreach (var (path, calls) in _calls)
             {
                 if (calls > count)
-                    (mode, count) = (bytes, calls);
+                    (mode, count) = (path, calls);
             }
 
             if (count * 2 > _total)
                 return mode;
 
-            var paths = new List<KeyValuePair<long, int>>(_calls);
-            paths.Sort(static (a, b) => b.Value.CompareTo(a.Value));
-            var shown = string.Join(", ", paths.GetRange(0, Math.Min(paths.Count, 6)).ConvertAll(p =>
-                string.Create(CultureInfo.InvariantCulture, $"{p.Key} B in {p.Value}")));
             throw new InvalidOperationException(
-                $"AllocationGate: {what} took no one path in most of its {_total} calls: {shown}. " +
+                $"AllocationGate: {what} took no one path in most of its {Describe()}. " +
                 "A call allocates a different amount on each path, for example when an await does or does not " +
                 "yield, and here which path it takes depends on timing. Run it where the machine is less busy, " +
                 "or gate an allocation that only some calls make with AssertBudgetAsync.");
+        }
+
+        // "1000 calls: 1392 B asynchronously in 760, ...", the six most common paths.
+        public string Describe()
+        {
+            var paths = new List<KeyValuePair<CallPath, int>>(_calls);
+            paths.Sort(static (a, b) => b.Value.CompareTo(a.Value));
+            var shown = string.Join(", ", paths.GetRange(0, Math.Min(paths.Count, 6)).ConvertAll(p =>
+                string.Create(CultureInfo.InvariantCulture, $"{p.Key} in {p.Value}")));
+            return string.Create(CultureInfo.InvariantCulture, $"{_total} calls: {shown}");
         }
     }
 
