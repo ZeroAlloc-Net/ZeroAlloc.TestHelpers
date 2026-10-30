@@ -366,8 +366,29 @@ public sealed class StableMeasurementTests
             AllocationGate.MeasureBytesPerCallInterleavedAsync(Iterations, even.Call, static () => new ValueTask<int>(1)));
 
         Assert.Contains("first call took no one path in most of its", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("56 B in ", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("88 B in ", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("56 B synchronously in ", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("88 B synchronously in ", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MeasureBytesPerCallInterleavedAsync_SidesUsuallyCompleteDifferently_Throws()
+    {
+        // ZeroAlloc.ORM#434: under heavy load one side's usual path was the synchronous one, the
+        // others' the asynchronous one, and the difference of the two read 960 B over the budget.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AllocationGate.MeasureBytesPerCallInterleavedAsync(
+                Iterations,
+                static () => new ValueTask<int>(1),
+                static async () =>
+                {
+                    await Task.Yield();
+                    return 2;
+                }));
+
+        Assert.Contains("cannot compare the calls", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("first call mostly 0 B synchronously", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("second call mostly ", ex.Message, StringComparison.Ordinal);
+        Assert.Contains($" B asynchronously, of {Iterations * AllocationGate.ModeWindows} calls", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
