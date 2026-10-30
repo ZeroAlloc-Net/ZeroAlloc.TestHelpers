@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.Globalization;
@@ -36,18 +37,19 @@ internal static class AllocationGate
     /// allocates at all never reads as zero.
     /// </summary>
     /// <remarks>
-    /// Stable means two consecutive windows read the same, and tiered compilation has settled for
-    /// <see cref="TieringSettleMilliseconds"/>, so the code measured is the optimised code that
-    /// keeps running, not the tier-0 code the JIT compiles first. That takes a few hundred
-    /// milliseconds after the call is first made. Measuring stops after
-    /// <see cref="StabilityTimeoutMilliseconds"/> regardless.
+    /// Stable means two consecutive windows read the same, and tiered compilation has settled, so
+    /// the code measured is the optimised code that keeps running, not the tier-0 code the JIT
+    /// compiles first. That takes about a second after the call is first made. Windows that
+    /// disagree stop the measurement after <see cref="StabilityTimeoutMilliseconds"/>. Tiered
+    /// compilation that has not settled after four times as long makes it throw
+    /// <see cref="InvalidOperationException"/>, because the figure could be the tier-0 one.
     /// </remarks>
     public static long MeasureBytesPerCall(int iterations, Action action)
     {
         ArgumentNullException.ThrowIfNull(action);
         ArgumentOutOfRangeException.ThrowIfLessThan(iterations, 1);
 
-        return PerCall(MeasureTotal(iterations, action, NoBudget).Least, iterations);
+        return PerCall(ThrowIfTieringUnsettled(MeasureTotal(iterations, action, NoBudget), nameof(MeasureBytesPerCall)).Least, iterations);
     }
 
     /// <summary>
@@ -59,7 +61,9 @@ internal static class AllocationGate
         ArgumentNullException.ThrowIfNull(action);
         ArgumentOutOfRangeException.ThrowIfLessThan(iterations, 1);
 
-        return PerCall(MeasureTotalValueTask(iterations, action, NoBudget).Least, iterations);
+        return PerCall(
+            ThrowIfTieringUnsettled(MeasureTotalValueTask(iterations, action, NoBudget), nameof(MeasureBytesPerCallValueTask)).Least,
+            iterations);
     }
 
     /// <summary>
@@ -75,6 +79,7 @@ internal static class AllocationGate
         var baselineTotal = MeasureTotal(iterations, baseline, NoBudget);
         var candidateTotal = MeasureTotal(iterations, candidate, baselineTotal.Least);
         ThrowIfOverBaseline(iterations, baselineTotal, candidateTotal, label);
+        _ = ThrowIfTieringUnsettled(baselineTotal, label + " baseline");
     }
 
     /// <summary><see cref="AssertNoMoreThan"/> for APIs that return <see cref="ValueTask{TResult}"/>.</summary>
@@ -88,6 +93,7 @@ internal static class AllocationGate
         var baselineTotal = MeasureTotalValueTask(iterations, baseline, NoBudget);
         var candidateTotal = MeasureTotalValueTask(iterations, candidate, baselineTotal.Least);
         ThrowIfOverBaseline(iterations, baselineTotal, candidateTotal, label);
+        _ = ThrowIfTieringUnsettled(baselineTotal, label + " baseline");
     }
 
     // ---------------------------------------------------------------------------------------
@@ -132,22 +138,53 @@ internal static class AllocationGate
     public const int DefaultAsyncToleranceBytesPerCall = 8;
 
     /// <summary>
-    /// How long, in milliseconds, tiered compilation must have been idle before a measurement that
-    /// is not yet within its budget counts as stable. Tiered compilation first runs a method as
+    /// How long, in milliseconds, the JIT must have compiled nothing before a measurement that is
+    /// not yet within its budget counts as stable. Tiered compilation first runs a method as
     /// unoptimised tier-0 code, which can allocate where the optimised code does not, for example
     /// by boxing. It delays counting calls until no new method has been called for 100 ms, then
-    /// compiles the optimised code on a background thread, in up to two steps with tiered PGO.
-    /// The gate follows that through the runtime's tiering events, which reach it about 10 ms
-    /// late; this margin covers that lag.
+    /// compiles the optimised code on a background thread, in up to two steps with tiered PGO,
+    /// a delay apart. The gate follows that through the runtime's tiering events, which reach it
+    /// late, and also waits three times this long after the last of them.
     /// </summary>
     public const int TieringSettleMilliseconds = 100;
 
     /// <summary>
-    /// The longest, in milliseconds, a gate keeps measuring windows after its warmup. A
-    /// measurement that is not stable by then reports the least window seen, and a failure
-    /// message says that it never stabilised.
+    /// The longest, in milliseconds, a gate keeps measuring windows after its warmup while
+    /// tiered compilation is settled. A measurement whose windows do not agree by then reports the
+    /// least window seen, and a failure message says that it never stabilised. While tiered
+    /// compilation is not settled a gate keeps measuring for four times as long, and then throws
+    /// rather than report a figure that may be the tier-0 one.
     /// </summary>
     public const int StabilityTimeoutMilliseconds = 5_000;
+
+    // A comparison of two calls that cost the same keeps measuring both for at least this many
+    // windows each, and compares the median window of each (#76). The window of a call that
+    // completes on another thread varies with how the scheduler happened to run it: every so
+    // often a window is a few percent lower than all the others, because some calls found their
+    // work already done. That is not noise from another thread, which could only add. The least
+    // window of a side that had such a dip was then several bytes per call below the other side's
+    // least, and two equal calls differed by more than the tolerance about one run in thirty. The
+    // median is not moved by a minority of windows, in either direction.
+    private const int ComparisonWindows = 15;
+
+    // How long tiering must have shown no sign of activity before a measurement counts as settled.
+    // Three tiering delays: a batch of promotions, and the batch after it, are at least one delay
+    // apart, and the events that report them arrive late. See Stability.JitHasSettled.
+    private const int TieringQuietMilliseconds = 3 * TieringSettleMilliseconds;
+
+    // How long before a window began the runtime's last report must have been, for the window to
+    // count as measured after it. The runtime starts the background compile just after it resumes
+    // call counting, and the report of either reaches the gate a few milliseconds late.
+    private const int TieringEventLagMilliseconds = 25;
+
+    // How long the least window must have held for a measurement to count as settled although the
+    // process never went quiet, see Stability.JitHasSettled.
+    private const int TieringConvergenceMilliseconds = 5 * TieringQuietMilliseconds;
+
+    // The longest a measurement whose windows agree waits for tiering to settle. Tiering can be
+    // held back as long as any thread keeps calling methods for the first time, as at the start of
+    // a large test run, so this is longer than StabilityTimeoutMilliseconds.
+    private const int TieringTimeoutMilliseconds = 4 * StabilityTimeoutMilliseconds;
 
     // Before each window: how long no thread may allocate, and how long to wait for that.
     private const int QuietPeriodMilliseconds = 10;
@@ -286,8 +323,7 @@ internal static class AllocationGate
 
         return AssertNoMoreThanCoreAsync(
             iterations, toleranceBytesPerCall,
-            () => MeasureLeastWindowAsync(iterations, warmup, NoBudget, toleranceBytesPerCall, baseline),
-            allowed => MeasureLeastWindowAsync(iterations, warmup, allowed, toleranceBytesPerCall, candidate),
+            () => MeasureInterleavedAsync(iterations, warmup, toleranceBytesPerCall, baseline, candidate),
             label);
     }
 
@@ -313,8 +349,7 @@ internal static class AllocationGate
 
         return AssertNoMoreThanCoreAsync(
             iterations, toleranceBytesPerCall,
-            () => MeasureLeastWindowAsync(iterations, warmup, NoBudget, toleranceBytesPerCall, baseline),
-            allowed => MeasureLeastWindowAsync(iterations, warmup, allowed, toleranceBytesPerCall, candidate),
+            () => MeasureInterleavedAsync(iterations, warmup, toleranceBytesPerCall, baseline, candidate),
             label);
     }
 
@@ -331,7 +366,7 @@ internal static class AllocationGate
     // Each measurement runs through Task.Run: on a thread-pool thread, away from the caller's
     // SynchronizationContext.
     private static async Task<long> PerCallAsync(Func<Task<Measurement>> measure, int iterations) =>
-        PerCall((await Task.Run(measure).ConfigureAwait(false)).Least, iterations);
+        PerCall(ThrowIfTieringUnsettled(await Task.Run(measure).ConfigureAwait(false), nameof(MeasureBytesPerCallAsync)).Least, iterations);
 
     private static async Task AssertBudgetCoreAsync(
         int budgetBytes, int toleranceBytesPerCall, int iterations, Func<Task<Measurement>> measure, string label)
@@ -351,23 +386,25 @@ internal static class AllocationGate
 
     private static async Task AssertNoMoreThanCoreAsync(
         int iterations, int toleranceBytesPerCall,
-        Func<Task<Measurement>> measureBaseline, Func<long, Task<Measurement>> measureCandidate, string label)
+        Func<Task<(Measurement Baseline, Measurement Candidate)>> measure, string label)
     {
-        // One after the other, never concurrently: each would count the other's allocations.
-        var baseline = await Task.Run(measureBaseline).ConfigureAwait(false);
-        var allowed = baseline.Least + ((long)toleranceBytesPerCall * iterations);
-        var candidate = await Task.Run(() => measureCandidate(allowed)).ConfigureAwait(false);
+        var (baseline, candidate) = await Task.Run(measure).ConfigureAwait(false);
+        var allowed = baseline.Compared + ((long)toleranceBytesPerCall * iterations);
 
-        if (candidate.Least > allowed)
+        if (candidate.Compared > allowed)
         {
             throw new InvalidOperationException(
-                $"AllocationGate: {label} candidate allocated {candidate.Least} B total over {iterations} iterations " +
-                $"({FormatPerCall(candidate.Least, iterations)} B/call avg, {Describe(candidate)}), " +
-                $"baseline allocated {baseline.Least} B total " +
-                $"({FormatPerCall(baseline.Least, iterations)} B/call avg, {Describe(baseline)}), " +
+                $"AllocationGate: {label} candidate allocated {candidate.Compared} B total over {iterations} iterations " +
+                $"({FormatPerCall(candidate.Compared, iterations)} B/call avg, {DescribeMedian(candidate)}), " +
+                $"baseline allocated {baseline.Compared} B total " +
+                $"({FormatPerCall(baseline.Compared, iterations)} B/call avg, {DescribeMedian(baseline)}), " +
                 $"with a tolerance of {toleranceBytesPerCall} B/call. Both are counted on every thread. " +
                 "Use BenchmarkDotNet [MemoryDiagnoser] locally to find the culprit.");
         }
+
+        // A baseline measured while the code was still tier 0 reads too high, so a candidate
+        // within it proves nothing.
+        _ = ThrowIfTieringUnsettled(baseline, label + " baseline");
     }
 
     // Waits until no thread in the process has allocated for QuietPeriodMilliseconds, so a
@@ -396,10 +433,11 @@ internal static class AllocationGate
         int iterations, int warmup, long totalBudget, int toleranceBytesPerCall, Func<ValueTask> action)
     {
         SettleHeap();
+        var begun = Stopwatch.GetTimestamp();
 
         for (int i = 0; i < warmup; i++) await action().ConfigureAwait(false);
 
-        var stability = new Stability(totalBudget, (long)toleranceBytesPerCall * iterations);
+        var stability = new Stability(totalBudget, (long)toleranceBytesPerCall * iterations, begun);
         long window;
         do
         {
@@ -418,10 +456,11 @@ internal static class AllocationGate
         int iterations, int warmup, long totalBudget, int toleranceBytesPerCall, Func<ValueTask<T>> action)
     {
         SettleHeap();
+        var begun = Stopwatch.GetTimestamp();
 
         for (int i = 0; i < warmup; i++) _ = await action().ConfigureAwait(false);
 
-        var stability = new Stability(totalBudget, (long)toleranceBytesPerCall * iterations);
+        var stability = new Stability(totalBudget, (long)toleranceBytesPerCall * iterations, begun);
         long window;
         do
         {
@@ -432,6 +471,72 @@ internal static class AllocationGate
         }
         while (!stability.IsDone(window));
         return stability.Result;
+    }
+
+    // The two sides of AssertNoMoreThanAsync are measured in alternating windows, baseline,
+    // candidate, baseline, candidate, until both are stable, and each keeps the same number of
+    // windows (#76). Measured one after the other, the baseline and the candidate each ran until
+    // their own windows agreed. Noise from other threads can keep that from happening for the
+    // whole timeout, so one side could keep the least of hundreds of windows and the other the
+    // least of ten, and the least of more windows is lower: equal calls then differed by more than
+    // the tolerance about one run in a hundred. Alternating also gives both sides the same thread
+    // pool, the same heap and the same background activity at every moment.
+    private static async Task<(Measurement Baseline, Measurement Candidate)> MeasureInterleavedAsync(
+        int iterations, int warmup, int toleranceBytesPerCall, Func<ValueTask> baseline, Func<ValueTask> candidate)
+    {
+        SettleHeap();
+        var begun = Stopwatch.GetTimestamp();
+
+        for (int i = 0; i < warmup; i++) await baseline().ConfigureAwait(false);
+        var candidateBegun = Stopwatch.GetTimestamp();
+        for (int i = 0; i < warmup; i++) await candidate().ConfigureAwait(false);
+
+        var baselineStability = new Stability(NoBudget, (long)toleranceBytesPerCall * iterations, begun, keepWindows: true);
+        var candidateStability = new Stability(NoBudget, (long)toleranceBytesPerCall * iterations, candidateBegun, keepWindows: true);
+        while (true)
+        {
+            WaitForQuietProcess();
+            var before = GC.GetTotalAllocatedBytes(precise: true);
+            for (int i = 0; i < iterations; i++) await baseline().ConfigureAwait(false);
+            baselineStability.Record(GC.GetTotalAllocatedBytes(precise: true) - before);
+
+            WaitForQuietProcess();
+            before = GC.GetTotalAllocatedBytes(precise: true);
+            for (int i = 0; i < iterations; i++) await candidate().ConfigureAwait(false);
+            candidateStability.Record(GC.GetTotalAllocatedBytes(precise: true) - before);
+
+            if (Stability.BothDone(baselineStability, candidateStability))
+                return (baselineStability.Result, candidateStability.Result);
+        }
+    }
+
+    private static async Task<(Measurement Baseline, Measurement Candidate)> MeasureInterleavedAsync<T>(
+        int iterations, int warmup, int toleranceBytesPerCall, Func<ValueTask<T>> baseline, Func<ValueTask<T>> candidate)
+    {
+        SettleHeap();
+        var begun = Stopwatch.GetTimestamp();
+
+        for (int i = 0; i < warmup; i++) _ = await baseline().ConfigureAwait(false);
+        var candidateBegun = Stopwatch.GetTimestamp();
+        for (int i = 0; i < warmup; i++) _ = await candidate().ConfigureAwait(false);
+
+        var baselineStability = new Stability(NoBudget, (long)toleranceBytesPerCall * iterations, begun, keepWindows: true);
+        var candidateStability = new Stability(NoBudget, (long)toleranceBytesPerCall * iterations, candidateBegun, keepWindows: true);
+        while (true)
+        {
+            WaitForQuietProcess();
+            var before = GC.GetTotalAllocatedBytes(precise: true);
+            for (int i = 0; i < iterations; i++) _ = await baseline().ConfigureAwait(false);
+            baselineStability.Record(GC.GetTotalAllocatedBytes(precise: true) - before);
+
+            WaitForQuietProcess();
+            before = GC.GetTotalAllocatedBytes(precise: true);
+            for (int i = 0; i < iterations; i++) _ = await candidate().ConfigureAwait(false);
+            candidateStability.Record(GC.GetTotalAllocatedBytes(precise: true) - before);
+
+            if (Stability.BothDone(baselineStability, candidateStability))
+                return (baselineStability.Result, candidateStability.Result);
+        }
     }
 
     // The synchronous gates warm up and measure as the asynchronous ones do (#84, #89): the same
@@ -446,11 +551,12 @@ internal static class AllocationGate
     private static Measurement MeasureTotal(int iterations, Action action, long totalBudget)
     {
         SettleHeap();
+        var begun = Stopwatch.GetTimestamp();
 
         // Warmup: JIT-compile, populate type-handle caches and pools, allocate one-time fixtures.
         for (int i = 0; i < DefaultAsyncWarmup; i++) action();
 
-        var stability = new Stability(totalBudget, agreementBytes: 0);
+        var stability = new Stability(totalBudget, agreementBytes: 0, begun);
         while (true)
         {
             var before = GC.GetAllocatedBytesForCurrentThread();
@@ -476,10 +582,11 @@ internal static class AllocationGate
     private static Measurement MeasureTotalValueTask<T>(int iterations, Func<ValueTask<T>> action, long totalBudget)
     {
         SettleHeap();
+        var begun = Stopwatch.GetTimestamp();
 
         for (int i = 0; i < DefaultAsyncWarmup; i++) Drain(action());
 
-        var stability = new Stability(totalBudget, agreementBytes: 0);
+        var stability = new Stability(totalBudget, agreementBytes: 0, begun);
         while (true)
         {
             var before = GC.GetAllocatedBytesForCurrentThread();
@@ -491,10 +598,19 @@ internal static class AllocationGate
         }
     }
 
-    /// <summary>The least window a gate measured, how many windows it took, and whether they settled.</summary>
-    private readonly record struct Measurement(long Least, int Windows, bool Stable);
+    /// <summary>
+    /// The least window a gate measured, how many windows it took, whether they settled, and
+    /// whether the measurement ended because tiered compilation never did.
+    /// </summary>
+    private readonly record struct Measurement(
+        long Least, int Windows, bool Stable, bool TieringUnsettled = false, long? Median = null)
+    {
+        // What two measurements are compared by: the median when the gate kept the windows, the
+        // least otherwise.
+        public long Compared => Median ?? Least;
+    }
 
-    // When to stop measuring windows, shared by every gate (#89).
+    // When to stop measuring windows, shared by every gate (#89, #94).
     //
     // Tiered compilation runs a method as tier-0 code first, which can allocate where the
     // optimised code does not: it boxes value types the optimiser keeps unboxed, and it does not
@@ -506,32 +622,51 @@ internal static class AllocationGate
     //
     //   - the least window is already within the budget. Later windows can only lower the least,
     //     so they cannot change a pass into a failure, and a passing gate stops after two windows;
-    //   - or tiered compilation has settled, see Tiering: it is not waiting to count calls, it is
-    //     not compiling in the background, and neither it nor the JIT has done anything for
-    //     TieringSettleMilliseconds. Without a JIT, as in a Native AOT app, the code never
-    //     changes and two agreeing windows are enough.
+    //   - or tiered compilation has settled, see JitHasSettled. Without a JIT, as in a Native AOT
+    //     app, the code never changes and two agreeing windows are enough.
     //
-    // A measurement that does neither within StabilityTimeoutMilliseconds stops there with the
-    // least window seen, marked as never stable. It always measures at least two windows.
+    // The runtime promotes the methods of a call path in batches, with a gap of at least the
+    // tiering delay between two of them, and the signals that say a promotion is under way reach
+    // the gate late. Allocation only ever goes down as code is promoted, so the measurement itself
+    // is the last word: a window that is lower than the least so far shows that the code changed,
+    // and settling starts again from there.
+    //
+    // A measurement whose windows do not agree within StabilityTimeoutMilliseconds stops there with
+    // the least window seen, marked as never stable. One whose tiering has not settled keeps
+    // waiting, whether its windows agree or not, up to TieringTimeoutMilliseconds and is then
+    // marked as such: its figure can be the tier-0 one, so the gates that return a figure throw
+    // instead of returning it. It always measures at least two windows.
     private sealed class Stability
     {
         private readonly long _totalBudget;
         private readonly long _agreementBytes;
+        private readonly long _begun; // before the warmup, so before the first call of the code measured
         private readonly long _started;
+        private readonly List<long> _all = new List<long>();
+        private readonly bool _keepWindows;
         private long _compiledMethods;
         private long _lastCompile;
+        private long _lastDecrease;
+        private long _lastRecord;
+        private long _windowStarted;
         private long _previous;
-        private long _least;
+        private long _least = long.MaxValue;
         private int _windows;
+        private bool _agrees;
 
-        public Stability(long totalBudget, long agreementBytes)
+        // keepWindows: remember every window, for the median.
+        public Stability(long totalBudget, long agreementBytes, long begun, bool keepWindows = false)
         {
+            _keepWindows = keepWindows;
             _totalBudget = totalBudget;
             _agreementBytes = agreementBytes;
+            _begun = begun;
             _started = Stopwatch.GetTimestamp();
             _lastCompile = _started;
+            _lastDecrease = _started;
+            _lastRecord = _started;
+            _windowStarted = _started;
             _compiledMethods = JitInfo.GetCompiledMethodCount();
-            _least = long.MaxValue;
         }
 
         public Measurement Result { get; private set; }
@@ -543,6 +678,12 @@ internal static class AllocationGate
         // Records one window and returns whether to stop. Runs between windows, never inside one.
         public bool IsDone(long window)
         {
+            Record(window);
+            return Evaluate();
+        }
+
+        public void Record(long window)
+        {
             var now = Stopwatch.GetTimestamp();
             var compiledMethods = JitInfo.GetCompiledMethodCount();
             if (compiledMethods != _compiledMethods)
@@ -551,32 +692,130 @@ internal static class AllocationGate
                 _lastCompile = now;
             }
 
-            var agrees = _windows > 0 && Math.Abs(window - _previous) <= _agreementBytes;
+            _agrees = _windows > 0 && Math.Abs(window - _previous) <= _agreementBytes;
+            // A decrease within twice the agreement is the spread of the windows, not the code
+            // changing: a call that completes on another thread varies by a few percent.
+            if (_windows > 0 && window < _least - (2 * _agreementBytes))
+                _lastDecrease = now;
+
+            if (_keepWindows)
+                _all.Add(window);
             _previous = window;
             _least = Math.Min(_least, window);
             _windows++;
+            _windowStarted = _lastRecord;
+            _lastRecord = now;
+        }
 
-            var stable = agrees && (_least <= _totalBudget || JitHasSettled(now));
-            WaitingForTiering = agrees && !stable;
-            if (stable || (_windows >= 2 && Stopwatch.GetElapsedTime(_started, now).TotalMilliseconds >= StabilityTimeoutMilliseconds))
+        // Whether to stop now, after the windows recorded so far. Sets Result when it returns true.
+        public bool Evaluate()
+        {
+            var now = Stopwatch.GetTimestamp();
+            var withinBudget = _least <= _totalBudget;
+            var settled = withinBudget || JitHasSettled(now);
+            var stable = _agrees && settled;
+            WaitingForTiering = _agrees && !stable;
+            if (stable)
             {
-                Result = new Measurement(_least, _windows, stable);
+                Result = new Measurement(_least, _windows, Stable: true);
+                return true;
+            }
+
+            if (_windows < 2)
+                return false;
+
+            // Windows that disagree while tiering is still going on are not an allocation that
+            // varies: the code is changing under the measurement. So the wait for tiering has its
+            // own, longer limit, and a figure from it is not returned.
+            var elapsed = Stopwatch.GetElapsedTime(_started, now).TotalMilliseconds;
+            if (elapsed >= TieringTimeoutMilliseconds || (elapsed >= StabilityTimeoutMilliseconds && settled))
+            {
+                Result = new Measurement(_least, _windows, Stable: false, TieringUnsettled: !settled);
                 return true;
             }
 
             return false;
         }
 
+        // Both sides of a comparison stop together, on the same number of windows, when each is
+        // stable and they have ComparisonWindows each, or when either has run out of time. The
+        // result then has the median of the windows.
+        public static bool BothDone(Stability first, Stability second)
+        {
+            var firstDone = first.Evaluate();
+            var secondDone = second.Evaluate();
+            if (!firstDone || !secondDone)
+                return false;
+
+            if (first.Result.Stable && second.Result.Stable && first._windows < ComparisonWindows)
+                return false;
+
+            first.Result = first.Result with { Median = first.Median() };
+            second.Result = second.Result with { Median = second.Median() };
+            return true;
+        }
+
+        private long Median()
+        {
+            var sorted = _all.ToArray();
+            Array.Sort(sorted);
+            return sorted[(sorted.Length - 1) / 2];
+        }
+
+        // Tiering has settled when the runtime reports no tier-up under way, see Tiering, and
+        // either of two things holds.
+        //
+        // Quiet. Nothing has hinted at a tier-up for long enough:
+        //
+        //   - no method was JIT-compiled for TieringSettleMilliseconds. The JIT's own counter is
+        //     exact and has no delay, which the runtime events have;
+        //   - no tiering event, and no window lower than the least, for TieringQuietMilliseconds,
+        //     and not before that long after the measurement began. The events reach the gate late,
+        //     and the runtime reports the start of a delay after it has started it, so a delay that
+        //     the call path's own first calls began can be unreported for a while. Methods are
+        //     promoted in batches, and the second batch of a method, from instrumented tier 0 to
+        //     tier 1, can wait for a delay of its own.
+        //
+        // Converged. In a process where other threads keep calling new methods, the first
+        // condition may never hold, because every new method restarts the delay. Then the
+        // measurement itself decides: the runtime has been seen to start call counting after the
+        // gate began, which it does for the methods the call path first called, and the least
+        // window has not gone down for TieringConvergenceMilliseconds. Allocation only goes down
+        // as code is promoted, so a method still waiting for its turn would have shown by now. And
+        // the runtime reports no delay and no compile at this moment, so nothing is holding the
+        // call path back right now either.
         private bool JitHasSettled(long now)
         {
-            if (!RuntimeFeature.IsDynamicCodeCompiled)
+            if (!RuntimeFeature.IsDynamicCodeCompiled || s_tieringOff)
                 return true;
 
-            var lastActivity = Math.Max(Math.Max(_lastCompile, _started), Tiering.LastEvent);
-            return Tiering.IsIdle(now) &&
-                Stopwatch.GetElapsedTime(lastActivity, now).TotalMilliseconds >= TieringSettleMilliseconds;
+            // The last window began a while after the runtime's last report. A window that ran
+            // while a batch of promotions was being installed, or just before one began, says
+            // nothing about the code after it.
+            if (Stopwatch.GetElapsedTime(Tiering.LastEvent, _windowStarted).TotalMilliseconds < TieringEventLagMilliseconds)
+                return false;
+
+            var compileQuiet = Stopwatch.GetElapsedTime(_lastCompile, now).TotalMilliseconds;
+            var lastChange = Math.Max(_started, _lastDecrease);
+            var lastActivity = Math.Max(lastChange, Tiering.LastEvent);
+            if (compileQuiet >= TieringSettleMilliseconds && Tiering.IsIdle(now, compileQuiet) &&
+                Stopwatch.GetElapsedTime(lastActivity, now).TotalMilliseconds >= TieringQuietMilliseconds)
+            {
+                return true;
+            }
+
+            return Tiering.IsCountingAndIdle && Tiering.LastResume > _begun &&
+                Stopwatch.GetElapsedTime(lastChange, now).TotalMilliseconds >= TieringConvergenceMilliseconds;
         }
     }
+
+    // With tiered compilation off the code is optimised from the first call and never changes.
+    private static readonly bool s_tieringOff = DetectTieringOff();
+
+    private static bool DetectTieringOff() =>
+        (AppContext.TryGetSwitch("System.Runtime.TieredCompilation", out var enabled) && !enabled) ||
+        string.Equals(Environment.GetEnvironmentVariable("DOTNET_TieredCompilation"), "0", StringComparison.Ordinal) ||
+        string.Equals(Environment.GetEnvironmentVariable("COMPlus_TieredCompilation"), "0", StringComparison.Ordinal);
 
     // Follows tiered compilation through the runtime's own events (#89), on the runtime event
     // source's CompilationKeyword, which carries only these:
@@ -588,19 +827,27 @@ internal static class AllocationGate
     //   283 TieredCompilationBackgroundJitStart   the background thread starts compiling
     //                                             optimised code for methods that were called
     //                                             often enough;
-    //   284 TieredCompilationBackgroundJitStop    it has finished.
+    //   284 TieredCompilationBackgroundJitStop    it has finished, or yielded for a moment.
     //
     // The delay restarts whenever any thread calls a method for the first time, precompiled
     // ReadyToRun code included, which compiles nothing. So a JIT that has been quiet for a while
     // does not show that no tier-up is on its way: in a test host the delay can last several
     // hundred milliseconds, and only the pause and resume events show it.
     //
+    // The events are not a precise clock. They reach the listener on the runtime's dispatch
+    // thread, in bursts, and the runtime sends the pause after it has started the delay, so the
+    // state below is what was true a little while ago. It says that tiering is active; it cannot
+    // say that tiering is not, which the quiet period in Stability.JitHasSettled covers.
+    //
     // One listener serves the whole process; it is created at the first gate and never disposed.
-    // Its state starts unknown and is treated as paused, so the first gate waits for the runtime
-    // to report where it is. A process where the events never arrive, because EventSource
-    // support is disabled, is treated as idle a second after the listener started. The
-    // listener's own work happens on the runtime's event dispatch thread, so the synchronous gates
-    // never count it, and the asynchronous ones only while tiering is active.
+    // Its state starts unknown, because a delay can already be running, and is treated as paused:
+    // the first gate waits for the runtime to report where it is. A process where no event
+    // arrives is treated as idle a second after the listener started, when the JIT has also
+    // compiled nothing for a while: EventSource support can be disabled, or a process that
+    // has run everything already has no tier-up left to report. While the JIT keeps compiling, the
+    // delay is running and the events will come. The listener's own work happens on the runtime's
+    // event dispatch thread, so the synchronous gates never count it, and the asynchronous ones
+    // only while tiering is active.
     private sealed class Tiering : EventListener
     {
         private const int Unknown = 0;
@@ -615,20 +862,32 @@ internal static class AllocationGate
         private int _state;
         private int _backgroundJit;
         private long _lastEvent;
+        private long _lastResume;
 
         // Starts the listener, ahead of the warmup, so the warmup's first calls are seen.
         public static void EnsureStarted() => _ = Instance;
 
         public static long LastEvent => Volatile.Read(ref Instance._lastEvent);
 
-        public static bool IsIdle(long now)
-        {
-            var state = Volatile.Read(ref Instance._state);
-            if (state == Unknown)
-                return Volatile.Read(ref Instance._lastEvent) == 0 &&
-                    Stopwatch.GetElapsedTime(Instance._created, now).TotalMilliseconds >= NoEventsTimeoutMilliseconds;
+        public static long LastResume => Volatile.Read(ref Instance._lastResume);
 
-            return state == Counting && Volatile.Read(ref Instance._backgroundJit) == 0;
+        // The runtime has reported that call counting is on and nothing is compiling.
+        public static bool IsCountingAndIdle =>
+            Volatile.Read(ref Instance._state) == Counting && Volatile.Read(ref Instance._backgroundJit) == 0;
+
+        // compileQuietMilliseconds: how long the JIT has compiled nothing.
+        public static bool IsIdle(long now, double compileQuietMilliseconds)
+        {
+            if (Volatile.Read(ref Instance._backgroundJit) != 0)
+                return false;
+
+            return Volatile.Read(ref Instance._state) switch
+            {
+                Counting => true,
+                Unknown => Stopwatch.GetElapsedTime(Instance._created, now).TotalMilliseconds >= NoEventsTimeoutMilliseconds &&
+                    compileQuietMilliseconds >= TieringQuietMilliseconds,
+                _ => false,
+            };
         }
 
         protected override void OnEventSourceCreated(EventSource eventSource)
@@ -641,6 +900,7 @@ internal static class AllocationGate
 
         protected override void OnEventWritten(EventWrittenEventArgs eventData)
         {
+            var now = Stopwatch.GetTimestamp();
             switch (eventData.EventId)
             {
                 case 281:
@@ -648,6 +908,7 @@ internal static class AllocationGate
                     break;
                 case 282:
                     Volatile.Write(ref _state, Counting);
+                    Volatile.Write(ref _lastResume, now);
                     break;
                 case 283:
                     Volatile.Write(ref _backgroundJit, 1);
@@ -659,7 +920,7 @@ internal static class AllocationGate
                     return;
             }
 
-            Volatile.Write(ref _lastEvent, Stopwatch.GetTimestamp());
+            Volatile.Write(ref _lastEvent, now);
         }
     }
 
@@ -687,7 +948,7 @@ internal static class AllocationGate
     // what survives.
     private static void SettleHeap()
     {
-        if (RuntimeFeature.IsDynamicCodeCompiled)
+        if (RuntimeFeature.IsDynamicCodeCompiled && !s_tieringOff)
             Tiering.EnsureStarted();
 
         GC.Collect();
@@ -717,8 +978,34 @@ internal static class AllocationGate
     private static string Describe(Measurement measured) =>
         measured.Stable
             ? $"the least of {measured.Windows} windows"
+            : measured.TieringUnsettled
+            ? $"the least of {measured.Windows} windows; tiered compilation was still active after {TieringTimeoutMilliseconds / 1000} s, " +
+              "so the code measured may still be unoptimised"
             : $"the least of {measured.Windows} windows; the measurement never stabilised within " +
               $"{StabilityTimeoutMilliseconds / 1000} s, so the windows still disagreed or tiered compilation was still active";
+
+    private static string DescribeMedian(Measurement measured) =>
+        $"the median of {measured.Windows} windows, the least {measured.Least} B" +
+        (measured.Stable ? "" : "; the measurement never stabilised, so the windows still disagreed or tiered compilation was still active");
+
+    // A figure measured while tiered compilation never settled can be the one of tier-0 code, which
+    // allocates where the code that keeps running does not. Returning it would be a wrong answer
+    // that looks like a right one.
+    private static Measurement ThrowIfTieringUnsettled(Measurement measured, string what)
+    {
+        if (measured.TieringUnsettled)
+        {
+            throw new InvalidOperationException(
+                $"AllocationGate: {what} could not be measured in steady state: tiered compilation was still active " +
+                $"{TieringTimeoutMilliseconds / 1000} s after the warmup, so the code measured may still be unoptimised and " +
+                $"allocate more than it does once it is (the least of {measured.Windows} windows read {measured.Least} B in total). " +
+                "The runtime holds tiering back while any thread keeps calling methods for the " +
+                "first time, as a large test run does at its start. Run the test where nothing else is starting up, " +
+                "for example in a collection of its own, or call the code under test before the gate.");
+        }
+
+        return measured;
+    }
 
     private static void ThrowIfOverBudget(int budgetBytes, int iterations, Measurement measured, string label)
     {
