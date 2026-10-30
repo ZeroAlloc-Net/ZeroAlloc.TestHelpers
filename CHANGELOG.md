@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.9.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.8.2...v1.9.0) (2026-10-30)
+
+
+### Features
+
+* add MeasureBytesPerCallInterleavedAsync for figures compared with each other ([#101](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/101)) ([9a5907a](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/9a5907af83da80294fbf2e6f92078f28e81a0e16))
+
+
+### Bug Fixes
+
+* gate MeasureBytesPerCallInterleavedAsync on the path most calls take ([#103](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/103)) ([a69e9d5](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/a69e9d527b36d9da30e355ca88c0c500d6d47486))
+
 ## [1.8.2](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.8.1...v1.8.2) (2026-10-30)
 
 
