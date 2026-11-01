@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.9.0...v1.9.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* mark the source files shipped to consumers as auto-generated ([#104](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/104)) ([b2a9b09](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/b2a9b09db02e1e28e9753e8f5ed23341a5e0dbf4))
+
 ## [1.9.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.8.2...v1.9.0) (2026-10-30)
 
 
