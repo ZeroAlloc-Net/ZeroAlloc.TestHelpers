@@ -6,10 +6,9 @@
       <DataCollector friendlyName="XPlat Code Coverage">
         <Configuration>
           <Format>cobertura</Format>
-          <!-- The test project compiles src/ZeroAlloc.TestHelpers/AllocationGate.cs as a linked
-               file, so that code lives in the test assembly. Measure the test assembly, and
-               leave out the test sources themselves by file. -->
-          <IncludeTestAssembly>true</IncludeTestAssembly>
+          <!-- The test project references src/ZeroAlloc.TestHelpers, so the helpers are measured
+               in their own assembly. The test assembly holds only tests. -->
+          <IncludeTestAssembly>false</IncludeTestAssembly>
           <!-- Generated and compiler-generated code says nothing about test quality. -->
           <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute,ObsoleteAttribute</ExcludeByAttribute>
           <ExcludeByFile>**/obj/**/*.cs,**/*.g.cs,**/tests/**/*.cs</ExcludeByFile>

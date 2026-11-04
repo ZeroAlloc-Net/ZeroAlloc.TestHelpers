@@ -67,6 +67,9 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>testing;allocation;zero-allocation;zeroalloc;aot;test-helpers</PackageTags>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>moderate</NuGetAuditLevel>
     <WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017</WarningsAsErrors>
   </PropertyGroup>
 

@@ -35,6 +35,11 @@
     <None Include="buildTransitive/ZeroAlloc.TestHelpers.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The helpers are internal. The attribute is generated into obj and never packed, so
+         consumers, who get the sources as contentFiles, do not see it. -->
+    <InternalsVisibleTo Include="ZeroAlloc.TestHelpers.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <AdditionalFiles Include="PublicAPI.Shipped.txt" />
     <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
   </ItemGroup>

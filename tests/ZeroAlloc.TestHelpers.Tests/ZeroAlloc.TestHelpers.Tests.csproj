@@ -4,8 +4,10 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="..\..\src\ZeroAlloc.TestHelpers\AllocationGate.cs"
-             Link="AllocationGate.cs" />
+    <!-- The helpers are internal and reach the tests through InternalsVisibleTo in the src project.
+         Referencing the project, rather than linking its source files in, keeps the code under test
+         in the ZeroAlloc.TestHelpers assembly, which is where the coverage gate measures it. -->
+    <ProjectReference Include="..\..\src\ZeroAlloc.TestHelpers\ZeroAlloc.TestHelpers.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
