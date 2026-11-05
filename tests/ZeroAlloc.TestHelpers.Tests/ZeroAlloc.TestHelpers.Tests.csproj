@@ -13,9 +13,18 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <!-- GeneratorSnapshot's tests drive small generators of their own. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="coverlet.collector">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+  </ItemGroup>
+  <!-- Snapshots are data, not code: every .verified.cs would otherwise be compiled and collide
+       with the others, as in the consumer repos. -->
+  <ItemGroup>
+    <Compile Remove="**/*.verified.cs" />
+    <Compile Remove="**/*.received.cs" />
+    <None Include="**/*.verified.cs" />
   </ItemGroup>
 </Project>
