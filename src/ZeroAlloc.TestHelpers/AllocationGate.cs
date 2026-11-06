@@ -1284,7 +1284,7 @@ internal static class AllocationGate
     }
 
     // How a figure in a message was measured, and whether it ever settled.
-    private static string Describe(Measurement measured) =>
+    private static string Describe(in Measurement measured) =>
         measured.Stable
             ? $"the least of {measured.Windows} windows"
             : measured.TieringUnsettled
@@ -1293,14 +1293,14 @@ internal static class AllocationGate
             : $"the least of {measured.Windows} windows; the measurement never stabilised within " +
               $"{StabilityTimeoutMilliseconds / 1000} s, so the windows still disagreed or tiered compilation was still active";
 
-    private static string DescribeMedian(Measurement measured) =>
+    private static string DescribeMedian(in Measurement measured) =>
         $"the median of {measured.Windows} windows, the least {measured.Least} B" +
         (measured.Stable ? "" : "; the measurement never stabilised, so the windows still disagreed or tiered compilation was still active");
 
     // A figure measured while tiered compilation never settled can be the one of tier-0 code, which
     // allocates where the code that keeps running does not. Returning it would be a wrong answer
     // that looks like a right one.
-    private static Measurement ThrowIfTieringUnsettled(Measurement measured, string what)
+    private static Measurement ThrowIfTieringUnsettled(in Measurement measured, string what)
     {
         if (measured.TieringUnsettled)
         {
@@ -1316,7 +1316,7 @@ internal static class AllocationGate
         return measured;
     }
 
-    private static void ThrowIfOverBudget(int budgetBytes, int iterations, Measurement measured, string label)
+    private static void ThrowIfOverBudget(int budgetBytes, int iterations, in Measurement measured, string label)
     {
         var totalBudget = TotalBudget(budgetBytes, 0, iterations);
         if (measured.Least > totalBudget)
@@ -1329,7 +1329,7 @@ internal static class AllocationGate
         }
     }
 
-    private static void ThrowIfOverBaseline(int iterations, Measurement baseline, Measurement candidate, string label)
+    private static void ThrowIfOverBaseline(int iterations, in Measurement baseline, in Measurement candidate, string label)
     {
         if (candidate.Least > baseline.Least)
         {
