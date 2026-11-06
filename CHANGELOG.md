@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.9.1...v1.10.0) (2026-11-06)
+
+
+### Features
+
+* keep snapshot files out of the consumer's compile ([#112](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/112)) ([794d8f8](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/794d8f8d9f0ea54a15dc045de3cf34f2e3eb7827)), closes [#111](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/111)
+
+
+### Bug Fixes
+
+* pass the Measurement struct by in in AllocationGate ([#113](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/113)) ([ec53939](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/ec53939846657bd44e566aa090cdd0c37ccc983e)), closes [#106](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/106)
+
 ## [1.9.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.9.0...v1.9.1) (2026-11-01)
 
 
