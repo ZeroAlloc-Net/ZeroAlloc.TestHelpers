@@ -39,4 +39,26 @@
       <_ZeroAllocTestHelpersGeneratorSnapshot Remove="@(_ZeroAllocTestHelpersGeneratorSnapshot)" />
     </ItemGroup>
   </Target>
+
+  <!--
+    GeneratorSnapshot and TextSnapshot write their .verified.cs and .received.cs files into the
+    Snapshots folder of the test project. The SDK's default globs compile them as source, so two
+    snapshots of one generated type collide with CS0101. They are data, so they are dropped from
+    the compile here and a consumer needs no item group of its own. Only the Snapshots folder
+    directly under the project is touched, which is where the helpers write; a .cs file anywhere
+    else is still source.
+
+    ZeroAllocTestHelpersCompileSnapshotFiles
+      unset  drop them.
+      true   leave them in the compile, for a project that compiles its snapshots on purpose.
+  -->
+  <Target Name="_ZeroAllocTestHelpersExcludeSnapshotFiles"
+          AfterTargets="ResolveAssemblyReferences"
+          BeforeTargets="CoreCompile"
+          Condition="'$(ZeroAllocTestHelpersCompileSnapshotFiles)' != 'true'">
+    <ItemGroup>
+      <Compile Remove="Snapshots/**/*.verified.cs" />
+      <Compile Remove="Snapshots/**/*.received.cs" />
+    </ItemGroup>
+  </Target>
 </Project>

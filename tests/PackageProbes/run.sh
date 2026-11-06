@@ -9,6 +9,10 @@
 #   TextSnapshotOnly           a test project with no Roslyn reference. TextSnapshot must compile
 #                              and its snapshot tests pass; GeneratorSnapshot.cs must stay out. #59
 #
+# GeneratorSnapshotConsumer also holds a second snapshot of the same generated type and a
+# .received.cs: the package must keep them out of the compile (#111), and the
+# ZeroAllocTestHelpersCompileSnapshotFiles override must put them back.
+#
 # The ZeroAllocTestHelpersIncludeGeneratorSnapshot override is checked in both directions.
 #
 # Usage: tests/PackageProbes/run.sh [--aot]
@@ -60,6 +64,10 @@ echo "::group::Override: true forces GeneratorSnapshot in, false forces it out"
 expect_failure AllocationGateOnly "error CS0234" -p:ZeroAllocTestHelpersIncludeGeneratorSnapshot=true
 expect_failure TextSnapshotOnly "error CS0246: The type or namespace name 'GeneratorDriver'" -p:ZeroAllocTestHelpersIncludeGeneratorSnapshot=true
 expect_failure GeneratorSnapshotConsumer "error CS0103" -p:ZeroAllocTestHelpersIncludeGeneratorSnapshot=false
+echo "::endgroup::"
+
+echo "::group::Override: CompileSnapshotFiles=true compiles the snapshots, so they collide"
+expect_failure GeneratorSnapshotConsumer "error CS0101" -p:ZeroAllocTestHelpersCompileSnapshotFiles=true
 echo "::endgroup::"
 
 if [[ "${1:-}" == "--aot" ]]; then

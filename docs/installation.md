@@ -34,6 +34,18 @@ To override the check, set `ZeroAllocTestHelpersIncludeGeneratorSnapshot`:
 </PropertyGroup>
 ```
 
+## Snapshot files stay out of the compile
+
+`GeneratorSnapshot` and `TextSnapshot` write `*.verified.cs` and `*.received.cs` files into the `Snapshots` folder directly under the test project. The SDK's default globs would compile them as source, and two snapshots of one generated type then fail with `CS0101`. The same targets file removes `Snapshots/**/*.verified.cs` and `Snapshots/**/*.received.cs` from `Compile`, so a project needs no `Compile Remove` item of its own. A `.cs` file anywhere else is still source.
+
+A project that compiles its snapshots on purpose can switch this off:
+
+```xml
+<PropertyGroup>
+  <ZeroAllocTestHelpersCompileSnapshotFiles>true</ZeroAllocTestHelpersCompileSnapshotFiles>
+</PropertyGroup>
+```
+
 ## Why source-only
 
 Test infrastructure should never appear on a consumer package's public API surface. By compiling into the consumer's assembly as `internal`, the helpers are scoped to each consumer and cost nothing at the consumer's runtime. `GeneratorSnapshot` also depends on this: `[CallerFilePath]` has to resolve to the consumer's test file.
