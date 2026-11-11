@@ -4,6 +4,8 @@
     graph, such as a Native AOT smoke app. GeneratorSnapshot.cs must not reach its compile.
   -->
   <PropertyGroup>
+    <TargetFrameworks />
+    <TargetFramework>net11.0</TargetFramework>
     <OutputType>Exe</OutputType>
     <Nullable>disable</Nullable>
     <PublishAot>true</PublishAot>
