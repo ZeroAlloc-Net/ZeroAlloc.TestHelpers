@@ -2,6 +2,10 @@
   <PropertyGroup>
     <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
     <IsPackable>false</IsPackable>
+    <!-- The snapshot tests write and delete files in the shared Snapshots folder, which a second
+         target framework run in parallel would race on. SnapshotCollection only serializes tests
+         inside one test process. -->
+    <TestTfmsInParallel>false</TestTfmsInParallel>
   </PropertyGroup>
   <ItemGroup>
     <!-- The helpers are internal and reach the tests through InternalsVisibleTo in the src project.
