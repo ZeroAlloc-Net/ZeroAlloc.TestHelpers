@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.10.0...v1.10.1) (2026-11-14)
+
+
+### Documentation
+
+* add context7.json to claim the library on Context7 ([#118](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/issues/118)) ([bdc6348](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/commit/bdc6348947b6669ff0a8df5f8fa91249b119840f))
+
 ## [1.10.0](https://github.com/ZeroAlloc-Net/ZeroAlloc.TestHelpers/compare/v1.9.1...v1.10.0) (2026-11-06)
 
 
